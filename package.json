@@ -1,0 +1,24 @@
+{
+  "name": "comida-saludable-app",
+  "version": "1.0.0",
+  "description": "Aplicación completa de planes nutricionales",
+  "main": "Backend/server.js",
+  "scripts": {
+    "start": "node Backend/server.js",
+    "dev": "nodemon Backend/server.js",
+    "test": "echo 'No tests available'",
+    "clean": "rm -rf node_modules package-lock.json && npm install"
+  },
+  "dependencies": {
+    "express": "^4.18.0",
+    "cors": "^2.8.5",
+    "mysql2": "^3.14.2",
+    "dotenv": "^17.2.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.0"
+  },
+  "keywords": ["nutricion", "salud", "planes", "alimentacion"],
+  "author": "",
+  "license": "ISC"
+}
