@@ -28,6 +28,17 @@ app.get('/api/test', (req, res) => {
   res.json({ ok: true });
 });
 
+// Inicializar tablas (útil para desarrollo)
+app.post('/api/inicializar-tablas', async (req, res) => {
+  try {
+    await db.crearTablaPlanesYUsuarios();
+    res.json({ success: true, mensaje: 'Tablas inicializadas correctamente' });
+  } catch (error) {
+    console.error('Error al inicializar tablas:', error);
+    res.status(500).json({ error: 'Error al inicializar tablas', detalles: error.message });
+  }
+});
+
 // Obtener información de la base de datos
 app.get('/api/info', async (req, res) => {
   try {
@@ -172,8 +183,16 @@ app.post('/api/usuarios', async (req, res) => {
       observaciones = '', preferencias = [], condiciones = []
     } = req.body;
 
+    // Normalizar el sexo para la base de datos
+    let sexoNormalizado = sexo;
+    if (sexo === 'M' || sexo === 'masculino' || sexo === 'Masculino') {
+      sexoNormalizado = 'masculino';
+    } else if (sexo === 'F' || sexo === 'femenino' || sexo === 'Femenino') {
+      sexoNormalizado = 'femenino';
+    }
+
     // 1. Crear usuario básico
-    const usuarioId = await db.crearUsuario(nombre, email, edad, peso, altura, sexo, observaciones);
+    const usuarioId = await db.crearUsuario(nombre, email, edad, peso, altura, sexoNormalizado, observaciones);
 
     // 2. Insertar preferencias
     for (const prefId of preferencias.map(Number)) {
@@ -351,6 +370,129 @@ app.get('/api/planes/:planId', async (req, res) => {
     res.json(planCompleto);
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+// ===== RUTAS PARA PLANES GUARDADOS =====
+
+// Obtener todos los planes de un usuario o todos los planes
+app.get('/api/planes', async (req, res) => {
+  try {
+    const { email } = req.query;
+    
+    let query = `
+      SELECT p.*, u.nombre, u.edad, u.peso, u.altura, u.sexo 
+      FROM planes p 
+      JOIN usuarios u ON p.usuario_id = u.id 
+      ORDER BY p.fecha_creacion DESC
+    `;
+    
+    let params = [];
+    
+    if (email) {
+      query = `
+        SELECT p.*, u.nombre, u.edad, u.peso, u.altura, u.sexo 
+        FROM planes p 
+        JOIN usuarios u ON p.usuario_id = u.id 
+        WHERE u.email = ?
+        ORDER BY p.fecha_creacion DESC
+      `;
+      params = [email];
+    }
+    
+    const planes = await db.ejecutarConsulta(query, params);
+    res.json(planes);
+  } catch (error) {
+    console.error('Error al obtener planes:', error);
+    res.status(500).json({ error: 'Error al obtener los planes guardados' });
+  }
+});
+
+// Obtener un plan específico por ID
+app.get('/api/planes/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // Obtener datos básicos del plan
+    const planQuery = `
+      SELECT p.*, u.nombre, u.edad, u.peso, u.altura, u.sexo, u.email
+      FROM planes p 
+      JOIN usuarios u ON p.usuario_id = u.id 
+      WHERE p.id = ?
+    `;
+    
+    const planData = await db.ejecutarConsulta(planQuery, [id]);
+    
+    if (planData.length === 0) {
+      return res.status(404).json({ error: 'Plan no encontrado' });
+    }
+    
+    const plan = planData[0];
+    
+    // Obtener el contenido del plan (puede estar en JSON)
+    if (plan.contenido_plan) {
+      try {
+        const contenidoPlan = JSON.parse(plan.contenido_plan);
+        
+        // Estructurar la respuesta similar a como se genera un plan nuevo
+        const response = {
+          id: plan.id,
+          nombre: plan.nombre,
+          edad: plan.edad,
+          peso: plan.peso,
+          altura: plan.altura,
+          sexo: plan.sexo,
+          fecha_creacion: plan.fecha_creacion,
+          calorias_objetivo: plan.calorias_objetivo,
+          requerimientos: contenidoPlan.requerimientos,
+          planSemanal: contenidoPlan.planSemanal,
+          resumenNutricionalSemanal: contenidoPlan.resumenNutricionalSemanal,
+          cumplimiento: contenidoPlan.cumplimiento,
+          promedioSemanal: contenidoPlan.promedioSemanal
+        };
+        
+        res.json(response);
+      } catch (parseError) {
+        console.error('Error al parsear contenido del plan:', parseError);
+        res.status(500).json({ error: 'Error al cargar el contenido del plan' });
+      }
+    } else {
+      // Si no hay contenido guardado, generar un plan nuevo basado en los datos del usuario
+      const usuario = {
+        id: plan.usuario_id,
+        nombre: plan.nombre,
+        email: plan.email,
+        edad: plan.edad,
+        peso: plan.peso,
+        altura: plan.altura,
+        sexo: plan.sexo
+      };
+      
+      const nuevoPlan = await generadorPlanes.generarPlanPersonalizado(usuario);
+      res.json(nuevoPlan);
+    }
+    
+  } catch (error) {
+    console.error('Error al obtener plan específico:', error);
+    res.status(500).json({ error: 'Error al cargar el plan' });
+  }
+});
+
+// Eliminar un plan
+app.delete('/api/planes/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const result = await db.ejecutarConsulta('DELETE FROM planes WHERE id = ?', [id]);
+    
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Plan no encontrado' });
+    }
+    
+    res.json({ success: true, message: 'Plan eliminado exitosamente' });
+  } catch (error) {
+    console.error('Error al eliminar plan:', error);
+    res.status(500).json({ error: 'Error al eliminar el plan' });
   }
 });
 

@@ -712,6 +712,196 @@ class BaseDeDatos {
       if (connection) connection.release();
     }
   }
+
+  // ===== MÉTODOS PARA PLANES GUARDADOS =====
+  
+  async crearTablaPlanesYUsuarios() {
+    let connection;
+    try {
+      connection = await this.pool.getConnection();
+      
+      // Crear tabla usuarios si no existe
+      const sqlUsuarios = `
+        CREATE TABLE IF NOT EXISTS usuarios (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          nombre VARCHAR(255) NOT NULL,
+          email VARCHAR(255) UNIQUE,
+          edad INT NOT NULL,
+          peso DECIMAL(5,2) NOT NULL,
+          altura INT NOT NULL,
+          sexo ENUM('masculino', 'femenino') NOT NULL,
+          observaciones TEXT,
+          fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      `;
+      await connection.execute(sqlUsuarios);
+      
+      // Crear tabla planes si no existe
+      const sqlPlanes = `
+        CREATE TABLE IF NOT EXISTS planes (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          usuario_id INT,
+          nombre VARCHAR(255) NOT NULL,
+          edad INT NOT NULL,
+          peso DECIMAL(5,2) NOT NULL,
+          altura INT NOT NULL,
+          sexo ENUM('masculino', 'femenino') NOT NULL,
+          calorias_objetivo INT,
+          contenido_plan LONGTEXT,
+          fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
+        )
+      `;
+      await connection.execute(sqlPlanes);
+      
+      console.log('✅ Tablas usuarios y planes creadas/verificadas exitosamente');
+      return true;
+    } catch (error) {
+      console.error('Error al crear tablas:', error.message);
+      throw error;
+    } finally {
+      if (connection) connection.release();
+    }
+  }
+
+  async guardarPlan(usuario, planCompleto) {
+    let connection;
+    try {
+      connection = await this.pool.getConnection();
+      
+      // Guardar usuario primero (o actualizarlo)
+      let usuarioId;
+      const emailPlan = usuario.email || `usuario_${Date.now()}_${Math.random().toString(36).substr(2, 9)}@temp.com`;
+      
+      const usuarioExistente = await this.obtenerUsuarioPorEmail(emailPlan);
+      
+      if (usuarioExistente) {
+        usuarioId = usuarioExistente.id;
+        console.log(`📝 Usuario existente encontrado con ID: ${usuarioId}`);
+      } else {
+        try {
+          // Normalizar el sexo para la base de datos
+          let sexoNormalizado = usuario.sexo;
+          if (usuario.sexo === 'M' || usuario.sexo === 'masculino' || usuario.sexo === 'Masculino') {
+            sexoNormalizado = 'masculino';
+          } else if (usuario.sexo === 'F' || usuario.sexo === 'femenino' || usuario.sexo === 'Femenino') {
+            sexoNormalizado = 'femenino';
+          }
+          
+          usuarioId = await this.crearUsuario(
+            usuario.nombre,
+            emailPlan,
+            usuario.edad,
+            usuario.peso,
+            usuario.altura,
+            sexoNormalizado,
+            usuario.observaciones
+          );
+          console.log(`👤 Nuevo usuario creado con ID: ${usuarioId}`);
+        } catch (error) {
+          if (error.message.includes('Duplicate entry')) {
+            // Si aún hay duplicado, generar un email único
+            const emailUnico = `usuario_${Date.now()}_${Math.random().toString(36).substr(2, 9)}@temp.com`;
+            let sexoNormalizado = usuario.sexo;
+            if (usuario.sexo === 'M' || usuario.sexo === 'masculino' || usuario.sexo === 'Masculino') {
+              sexoNormalizado = 'masculino';
+            } else if (usuario.sexo === 'F' || usuario.sexo === 'femenino' || usuario.sexo === 'Femenino') {
+              sexoNormalizado = 'femenino';
+            }
+            
+            usuarioId = await this.crearUsuario(
+              usuario.nombre,
+              emailUnico,
+              usuario.edad,
+              usuario.peso,
+              usuario.altura,
+              sexoNormalizado,
+              usuario.observaciones
+            );
+            console.log(`👤 Usuario creado con email único: ${emailUnico}, ID: ${usuarioId}`);
+          } else {
+            throw error;
+          }
+        }
+      }
+      
+      // Guardar el plan - también normalizar sexo aquí
+      let sexoParaPlan = usuario.sexo;
+      if (usuario.sexo === 'M' || usuario.sexo === 'masculino' || usuario.sexo === 'Masculino') {
+        sexoParaPlan = 'masculino';
+      } else if (usuario.sexo === 'F' || usuario.sexo === 'femenino' || usuario.sexo === 'Femenino') {
+        sexoParaPlan = 'femenino';
+      }
+      
+      const sql = `
+        INSERT INTO planes (
+          usuario_id, nombre, edad, peso, altura, sexo, 
+          calorias_objetivo, contenido_plan
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `;
+      
+      const contenidoJson = JSON.stringify(planCompleto);
+      const caloriaObjetivo = planCompleto.requerimientos?.calorias || null;
+      
+      const [resultado] = await connection.execute(sql, [
+        usuarioId,
+        usuario.nombre,
+        usuario.edad,
+        usuario.peso,
+        usuario.altura,
+        sexoParaPlan,
+        caloriaObjetivo,
+        contenidoJson
+      ]);
+      
+      console.log(`💾 Plan guardado exitosamente con ID: ${resultado.insertId}`);
+      return resultado.insertId;
+    } catch (error) {
+      console.error('Error al guardar plan:', error.message);
+      throw error;
+    } finally {
+      if (connection) connection.release();
+    }
+  }
+
+  async obtenerUsuarioPorEmail(email) {
+    let connection;
+    try {
+      connection = await this.pool.getConnection();
+      const sql = 'SELECT * FROM usuarios WHERE email = ?';
+      const [resultado] = await connection.execute(sql, [email]);
+      return resultado.length > 0 ? resultado[0] : null;
+    } catch (error) {
+      // Si la tabla no existe, devolver null
+      if (error.code === 'ER_NO_SUCH_TABLE') {
+        return null;
+      }
+      console.error('Error al obtener usuario por email:', error.message);
+      throw error;
+    } finally {
+      if (connection) connection.release();
+    }
+  }
+
+  async obtenerAlimentosBalanceados() {
+    let connection;
+    try {
+      connection = await this.pool.getConnection();
+      const sql = `
+        SELECT * FROM alimentos 
+        WHERE energia_kcal > 50 AND proteina_g > 0 
+        ORDER BY RAND() 
+        LIMIT 50
+      `;
+      const [alimentos] = await connection.execute(sql);
+      return alimentos;
+    } catch (error) {
+      console.error('Error al obtener alimentos balanceados:', error.message);
+      throw error;
+    } finally {
+      if (connection) connection.release();
+    }
+  }
 }
 
 // Exportar la clase para usar en otros archivos

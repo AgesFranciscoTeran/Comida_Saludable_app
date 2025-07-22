@@ -49,6 +49,64 @@ body {
     border: none;
 }
 
+/* Estilos para el menú principal */
+.hover-card {
+    cursor: pointer;
+    transition: all 0.3s ease;
+    border: 2px solid transparent !important;
+}
+
+.hover-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 15px 40px rgba(0,0,0,0.15);
+    border-color: currentColor !important;
+}
+
+.hover-card .card-body {
+    transition: all 0.3s ease;
+}
+
+.hover-card:hover .card-body {
+    background: linear-gradient(135deg, rgba(255,255,255,0.95), rgba(248,249,250,0.95));
+}
+
+.hover-card:hover .fas {
+    transform: scale(1.1);
+    transition: transform 0.3s ease;
+}
+
+/* Estilos para la lista de planes guardados */
+.plan-card {
+    cursor: pointer;
+    transition: all 0.3s ease;
+    border-left: 4px solid #17a2b8;
+}
+
+.plan-card:hover {
+    transform: translateX(5px);
+    box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+    border-left-color: #138496;
+}
+
+.plan-fecha {
+    font-size: 0.9rem;
+    color: #6c757d;
+}
+
+.plan-datos {
+    font-size: 0.85rem;
+}
+
+/* Animaciones de entrada */
+.fade-in {
+    animation: fadeIn 0.5s ease-in;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
 /* Estilos para advertencias de inventario */
 .alimento-item.border-warning {
     border-radius: 8px;

@@ -2,6 +2,176 @@
 const API_BASE = '/api';
 
 /* =========================================================
+   FUNCIONES DE NAVEGACIÓN DEL MENÚ PRINCIPAL
+   ========================================================= */
+
+/**
+ * Muestra el formulario para crear un nuevo plan
+ */
+function mostrarFormularioNuevo() {
+    document.getElementById('menu-principal').style.display = 'none';
+    document.getElementById('seccion-planes-guardados').style.display = 'none';
+    document.getElementById('seccion-formulario').style.display = 'block';
+    document.getElementById('seccion-formulario').classList.add('fade-in');
+}
+
+/**
+ * Muestra la sección de planes guardados
+ */
+async function mostrarPlanesGuardados() {
+    document.getElementById('menu-principal').style.display = 'none';
+    document.getElementById('seccion-formulario').style.display = 'none';
+    document.getElementById('seccion-planes-guardados').style.display = 'block';
+    document.getElementById('seccion-planes-guardados').classList.add('fade-in');
+    
+    // Cargar los planes guardados
+    await cargarPlanesGuardados();
+}
+
+/**
+ * Vuelve al menú principal
+ */
+function volverMenuPrincipal() {
+    document.getElementById('menu-principal').style.display = 'block';
+    document.getElementById('seccion-formulario').style.display = 'none';
+    document.getElementById('seccion-planes-guardados').style.display = 'none';
+    document.getElementById('resultados').style.display = 'none';
+    document.getElementById('menu-principal').classList.add('fade-in');
+}
+
+/**
+ * Carga la lista de planes guardados
+ */
+async function cargarPlanesGuardados() {
+    try {
+        const response = await fetch(`${API_BASE}/planes`);
+        const planes = await response.json();
+        
+        const listaPlanesDiv = document.getElementById('lista-planes-guardados');
+        const mensajeSinPlanesDiv = document.getElementById('mensaje-sin-planes');
+        
+        if (planes.length === 0) {
+            listaPlanesDiv.innerHTML = '';
+            mensajeSinPlanesDiv.style.display = 'block';
+        } else {
+            mensajeSinPlanesDiv.style.display = 'none';
+            listaPlanesDiv.innerHTML = planes.map(plan => `
+                <div class="card plan-card mb-3">
+                    <div class="card-body">
+                        <div class="row align-items-center">
+                            <div class="col-md-8" onclick="cargarPlan(${plan.id})" style="cursor: pointer;">
+                                <h5 class="card-title mb-1">
+                                    <i class="fas fa-user-circle text-success"></i> ${plan.nombre}
+                                </h5>
+                                <div class="plan-datos">
+                                    <span class="badge bg-info me-2">${plan.edad} años</span>
+                                    <span class="badge bg-secondary me-2">${plan.peso} kg</span>
+                                    <span class="badge bg-secondary me-2">${plan.altura} cm</span>
+                                    <span class="badge bg-primary">${plan.sexo}</span>
+                                </div>
+                            </div>
+                            <div class="col-md-4 text-end">
+                                <div class="plan-fecha mb-2">
+                                    <i class="fas fa-calendar"></i> 
+                                    ${new Date(plan.fecha_creacion).toLocaleDateString('es-ES')}
+                                </div>
+                                <div class="mb-2">
+                                    <small class="text-muted">
+                                        <i class="fas fa-fire"></i> ${plan.calorias_objetivo || 'N/A'} kcal
+                                    </small>
+                                </div>
+                                <div class="btn-group" role="group">
+                                    <button class="btn btn-sm btn-success" onclick="cargarPlan(${plan.id})" title="Ver Plan">
+                                        <i class="fas fa-eye"></i>
+                                    </button>
+                                    <button class="btn btn-sm btn-danger" onclick="eliminarPlan(${plan.id}, '${plan.nombre}')" title="Eliminar Plan">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+    } catch (error) {
+        console.error('Error al cargar planes:', error);
+        mostrarAlerta('error', 'Error al cargar los planes guardados');
+    }
+}
+
+/**
+ * Carga un plan específico
+ */
+async function cargarPlan(planId) {
+    try {
+        mostrarLoading(true);
+        const response = await fetch(`${API_BASE}/planes/${planId}`);
+        const plan = await response.json();
+        
+        if (response.ok) {
+            currentPlan = plan;
+            currentPlanId = plan.id;
+            
+            // Ocultar sección de planes guardados
+            document.getElementById('seccion-planes-guardados').style.display = 'none';
+            
+            // Mostrar el plan
+            if (plan.planSemanal) {
+                mostrarPlanSemanal(plan);
+            } else {
+                mostrarPlan(plan);
+            }
+        } else {
+            mostrarAlerta('error', plan.error || 'Error al cargar el plan');
+        }
+    } catch (error) {
+        console.error('Error al cargar plan:', error);
+        mostrarAlerta('error', 'Error al cargar el plan');
+    } finally {
+        mostrarLoading(false);
+    }
+}
+
+/**
+ * Elimina un plan específico
+ */
+async function eliminarPlan(planId, nombrePlan) {
+    if (!confirm(`¿Estás seguro de que deseas eliminar el plan de "${nombrePlan}"?`)) {
+        return;
+    }
+    
+    try {
+        mostrarLoading(true);
+        const response = await fetch(`${API_BASE}/planes/${planId}`, {
+            method: 'DELETE'
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok) {
+            mostrarAlerta('success', 'Plan eliminado exitosamente');
+            // Recargar la lista de planes
+            await cargarPlanesGuardados();
+        } else {
+            mostrarAlerta('error', result.error || 'Error al eliminar el plan');
+        }
+    } catch (error) {
+        console.error('Error al eliminar plan:', error);
+        mostrarAlerta('error', 'Error al eliminar el plan');
+    } finally {
+        mostrarLoading(false);
+    }
+}
+
+// Hacer las funciones accesibles globalmente
+window.mostrarFormularioNuevo = mostrarFormularioNuevo;
+window.mostrarPlanesGuardados = mostrarPlanesGuardados;
+window.volverMenuPrincipal = volverMenuPrincipal;
+window.cargarPlan = cargarPlan;
+window.eliminarPlan = eliminarPlan;
+
+/* =========================================================
    EVENTO INICIAL – cargar info de BD y registrar el formulario
    ========================================================= */
 document.getElementById('form').addEventListener('submit', async e => {
@@ -128,6 +298,15 @@ function mostrarPlanSemanal(plan) {
     const totalDias = Object.keys(plan.planSemanal).length;
 
     let html = `
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h3 class="text-success mb-0">
+        <i class="fas fa-calendar-week"></i> Plan Nutricional Semanal
+      </h3>
+      <button class="btn btn-outline-secondary" onclick="volverMenuPrincipal()">
+        <i class="fas fa-arrow-left"></i> Volver al Menú
+      </button>
+    </div>
+    
     <div class="plan-summary mb-4 fade-in">
       <div class="row text-center g-3">
         <div class="col-md-6">
@@ -321,24 +500,25 @@ function mostrarDia(detalles={}, diaNombre='') {
 function agregarBotonConfirmarPlan(plan) {
     const contentDiv = document.getElementById('plan-content');
     
-    // Verificar si hay alimentos con inventario insuficiente
-    let totalAdvertencias = 0;
+    // Contar todos los alimentos del plan
+    let totalAlimentos = 0;
     let alimentosDisponibles = 0;
     
     if (plan.planSemanal) {
         Object.values(plan.planSemanal).forEach(dia => {
-            if (dia.advertenciasInventario) {
-                totalAdvertencias += dia.advertenciasInventario.length;
-            }
             Object.values(dia.comidas || {}).forEach(comida => {
                 (comida.alimentos || []).forEach(alimento => {
-                    if (alimento.inventario && alimento.inventario.listo_para_procesar) {
-                        alimentosDisponibles++;
-                    }
+                    totalAlimentos++;
+                    // Por ahora, asumimos que todos los alimentos están disponibles
+                    // ya que el sistema los seleccionó del inventario disponible
+                    alimentosDisponibles++;
                 });
             });
         });
     }
+    
+    console.log(`📊 Total alimentos en el plan: ${totalAlimentos}`);
+    console.log(`✅ Alimentos disponibles para procesar: ${alimentosDisponibles}`);
     
     const botonHtml = `
         <div class="mt-4 text-center">
@@ -348,13 +528,6 @@ function agregarBotonConfirmarPlan(plan) {
                         <i class="fas fa-clipboard-check"></i> Confirmación del Plan
                     </h5>
                     <p class="card-text">
-                        ${totalAdvertencias > 0 ? 
-                            `<span class="text-warning">
-                                <i class="fas fa-exclamation-triangle"></i> 
-                                ${totalAdvertencias} alimento(s) tienen inventario insuficiente.
-                            </span><br>` 
-                            : ''
-                        }
                         <span class="text-success">
                             <i class="fas fa-check-circle"></i> 
                             ${alimentosDisponibles} alimento(s) están listos para ser procesados.

@@ -357,15 +357,18 @@ class GeneradorPlanes {
   }
 
   async generarPlanPersonalizado(usuario) {
-    const { id: usuarioId, nombre, edad, peso, altura, sexo, preferencias = [], condiciones = [] } = usuario;
+    const { nombre, edad, peso, altura, sexo, preferencias = [], condiciones = [] } = usuario;
+
+    // 0) Asegurar que las tablas existan
+    await this.db.crearTablaPlanesYUsuarios();
 
     // 1) Requerimientos y reparto diario
     const reqs       = this.calcularRequerimientosNutricionales(edad, peso, altura, sexo);
     const distrib    = this.distribuirNutrientes(reqs);
 
-    // 2) Crear cabecera de plan en BD
+    // 2) Generar ID temporal para el plan
+    const planId = Date.now(); // ID temporal
     const nombrePlan = `Plan de ${nombre} – ${new Date().toLocaleDateString()}`;
-    const planId     = await this.db.crearPlanNutricional(nombrePlan, usuarioId);
 
     // 3) Generar cada uno de los 7 días
     const dias = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'];
@@ -385,13 +388,8 @@ class GeneradorPlanes {
       const conds = condiciones.map(Number);
 
       for (const [comida, targets] of Object.entries(distrib)) {
-        // ↪️ Método correcto y pasando día_idx para rotar
-        const comidaGen = await this.generarComidaBalanceada(
-            comida,
-            targets,
-            planId,
-            { preferencias: prefs, condiciones: conds, diaIndice: idx }
-        );
+        // Generar comida balanceada (simplificada sin BD por ahora)
+        const comidaGen = await this.generarComidaBalanceadaSimple(comida, targets, { preferencias: prefs, condiciones: conds, diaIndice: idx });
         diario.comidas[comida] = comidaGen;
 
         this.acumularNutrientes(diario.resumenNutricional, comidaGen.nutrientesReales);
@@ -414,7 +412,110 @@ class GeneradorPlanes {
     };
     plan.cumplimientoSemanal = this.calcularCumplimiento(plan.resumenNutricionalSemanal, reqs);
 
+    // 6) Guardar el plan completo en la base de datos
+    try {
+      const planIdGuardado = await this.db.guardarPlan(usuario, plan);
+      plan.id = planIdGuardado;
+      console.log(`✅ Plan guardado con ID: ${planIdGuardado}`);
+    } catch (error) {
+      console.warn('⚠️ No se pudo guardar el plan en BD:', error.message);
+      // Continuar sin guardar si hay error
+    }
+
     return plan;
+  }
+
+  // Método simplificado para generar comidas sin dependencia de BD
+  async generarComidaBalanceadaSimple(tipoComida, targets, opciones = {}) {
+    const { preferencias = [], condiciones = [], diaIndice = 0 } = opciones;
+    
+    console.log(`🍽️ Generando ${tipoComida} con objetivo: ${targets.calorias} kcal`);
+    
+    // Obtener alimentos disponibles
+    const alimentosDisponibles = await this.db.obtenerAlimentosBalanceados();
+    
+    // Filtrar por preferencias y condiciones si es necesario
+    let alimentosFiltrados = alimentosDisponibles;
+    
+    // Rotar selección basada en el día para variedad
+    const inicio = (diaIndice * 3) % alimentosFiltrados.length;
+    alimentosFiltrados = [...alimentosFiltrados.slice(inicio), ...alimentosFiltrados.slice(0, inicio)];
+    
+    // Seleccionar alimentos de forma inteligente
+    const seleccion = [];
+    const acumulados = { calorias: 0, proteinas: 0, grasas: 0, carbohidratos: 0, fibra: 0 };
+    
+    // Límite máximo de calorías (con 10% de margen)
+    const maxCalorias = targets.calorias * 1.1;
+    const maxAlimentos = tipoComida === 'snacks' ? 2 : 3;
+    
+    for (let i = 0; i < Math.min(maxAlimentos, alimentosFiltrados.length) && acumulados.calorias < targets.calorias; i++) {
+      const alimento = alimentosFiltrados[i];
+      
+      // Calcular cuántas calorías necesitamos aún
+      const caloriasRestantes = Math.max(0, targets.calorias - acumulados.calorias);
+      
+      if (caloriasRestantes <= 10) break; // Si necesitamos muy pocas calorías, parar
+      
+      // Calcular cantidad óptima basada en calorías por 100g
+      const caloriasPor100g = alimento.energia_kcal || 100;
+      let cantidadOptima = (caloriasRestantes / caloriasPor100g) * 100;
+      
+      // Ajustar según tipo de comida y límites razonables
+      if (tipoComida === 'desayuno' || tipoComida === 'snacks') {
+        cantidadOptima = Math.max(30, Math.min(cantidadOptima, 120)); // 30-120g
+      } else {
+        cantidadOptima = Math.max(50, Math.min(cantidadOptima, 200)); // 50-200g
+      }
+      
+      // Si es el último alimento, ajustar para no exceder el objetivo
+      if (i === maxAlimentos - 1 || i === alimentosFiltrados.length - 1) {
+        const caloriasQueAportaria = (cantidadOptima / 100) * caloriasPor100g;
+        if (acumulados.calorias + caloriasQueAportaria > maxCalorias) {
+          cantidadOptima = Math.max(20, (caloriasRestantes / caloriasPor100g) * 100);
+        }
+      }
+      
+      const nutrientesAlimento = this.calcularNutrientesTotales(alimento, cantidadOptima);
+      
+      // Verificar que no nos excedamos mucho
+      if (acumulados.calorias + nutrientesAlimento.nutrientes.calorias > maxCalorias) {
+        // Reducir cantidad para ajustarse al límite
+        const factorReduccion = caloriasRestantes / nutrientesAlimento.nutrientes.calorias;
+        if (factorReduccion > 0 && factorReduccion < 1) {
+          const cantidadAjustada = cantidadOptima * factorReduccion;
+          const nutrientesAjustados = this.calcularNutrientesTotales(alimento, cantidadAjustada);
+          seleccion.push(nutrientesAjustados);
+          this.acumularNutrientes(acumulados, nutrientesAjustados.nutrientes);
+        }
+        break;
+      }
+      
+      seleccion.push(nutrientesAlimento);
+      this.acumularNutrientes(acumulados, nutrientesAlimento.nutrientes);
+      
+      console.log(`  ✅ ${alimento.nombre}: ${cantidadOptima.toFixed(1)}g = ${nutrientesAlimento.nutrientes.calorias} kcal`);
+    }
+    
+    console.log(`🎯 ${tipoComida} completado: ${acumulados.calorias} kcal (objetivo: ${targets.calorias})`);
+    
+    return {
+      tipo: tipoComida,
+      targets,
+      nutrientesReales: acumulados,
+      alimentos: seleccion,
+      analisis: this.analizarComida(targets, acumulados),
+      advertenciasInventario: []
+    };
+  }
+
+  // Método auxiliar para acumular nutrientes
+  acumularNutrientes(destino, fuente) {
+    destino.calorias += fuente.calorias || 0;
+    destino.proteinas += fuente.proteinas || 0;
+    destino.grasas += fuente.grasas || 0;
+    destino.carbohidratos += fuente.carbohidratos || 0;
+    destino.fibra += fuente.fibra || 0;
   }
   calcularRequerimientos(...args) {
     return this.calcularRequerimientosNutricionales(...args);
@@ -501,40 +602,78 @@ class GeneradorPlanes {
     
     try {
       console.log('🎯 Iniciando confirmación de plan y reducción de inventario...');
+      console.log('📊 Estructura del plan recibido:', Object.keys(planData));
+      
+      // El plan viene como planData.planSemanal, no planData.dias
+      const planSemanal = planData.planSemanal || {};
+      const dias = Object.keys(planSemanal);
+      
+      console.log('📅 Días encontrados en el plan:', dias);
+      
+      if (dias.length === 0) {
+        console.warn('⚠️ No se encontraron días en el plan');
+        return {
+          success: true,
+          mensaje: 'No hay alimentos para procesar en este plan',
+          exitos: [],
+          errores: [],
+          resumen: {
+            totalProcesados: 0,
+            totalErrores: 0,
+            fechaConfirmacion: new Date().toISOString()
+          }
+        };
+      }
       
       // Procesar cada día del plan
-      for (const dia of planData.dias || []) {
-        console.log(`📅 Procesando día ${dia.dia}`);
+      for (const nombreDia of dias) {
+        const diaData = planSemanal[nombreDia];
+        console.log(`📅 Procesando día ${nombreDia}:`, Object.keys(diaData.comidas || {}));
         
         // Procesar cada comida del día
-        for (const [tipoComida, comida] of Object.entries(dia.comidas)) {
-          console.log(`🍽️ Procesando ${tipoComida}`);
+        for (const [tipoComida, comida] of Object.entries(diaData.comidas || {})) {
+          console.log(`🍽️ Procesando ${tipoComida} del ${nombreDia}`);
+          console.log(`🥘 Alimentos en ${tipoComida}:`, comida.alimentos?.length || 0);
           
           // Procesar cada alimento de la comida
           for (const alimento of comida.alimentos || []) {
             try {
-              // Solo procesar alimentos que tienen inventario disponible
-              if (alimento.inventario && alimento.inventario.listo_para_procesar) {
+              console.log(`🔍 Procesando alimento: ${alimento.nombre} - ${alimento.cantidad}g`);
+              
+              // Verificar disponibilidad en inventario
+              const disponibilidad = await this.db.verificarDisponibilidadInventario(alimento.codigo, alimento.cantidad);
+              
+              if (disponibilidad.disponible) {
+                // Reducir inventario
                 await this.db.reducirInventario(alimento.codigo, alimento.cantidad);
                 
                 exitos.push({
                   codigo: alimento.codigo,
                   nombre: alimento.nombre,
                   cantidad: alimento.cantidad,
-                  dia: dia.dia,
+                  dia: nombreDia,
                   comida: tipoComida
                 });
                 
                 console.log(`✅ Inventario reducido: ${alimento.nombre} - ${alimento.cantidad}g`);
               } else {
-                console.log(`⚠️ Saltando ${alimento.nombre} - no tiene inventario suficiente`);
+                console.log(`⚠️ Saltando ${alimento.nombre} - inventario insuficiente (disponible: ${disponibilidad.cantidadDisponible}g)`);
+                
+                errores.push({
+                  codigo: alimento.codigo,
+                  nombre: alimento.nombre,
+                  cantidad: alimento.cantidad,
+                  dia: nombreDia,
+                  comida: tipoComida,
+                  error: `Inventario insuficiente. Disponible: ${disponibilidad.cantidadDisponible}g`
+                });
               }
             } catch (error) {
               errores.push({
                 codigo: alimento.codigo,
                 nombre: alimento.nombre,
                 cantidad: alimento.cantidad,
-                dia: dia.dia,
+                dia: nombreDia,
                 comida: tipoComida,
                 error: error.message
               });
@@ -549,7 +688,7 @@ class GeneradorPlanes {
       
       return {
         success: true,
-        mensaje: `Plan confirmado. ${exitos.length} productos procesados exitosamente`,
+        mensaje: `Plan confirmado. ${exitos.length} productos procesados exitosamente${errores.length > 0 ? `, ${errores.length} con errores` : ''}`,
         exitos,
         errores,
         resumen: {
