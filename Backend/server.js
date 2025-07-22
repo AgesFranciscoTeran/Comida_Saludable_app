@@ -1,30 +1,31 @@
 const express = require('express');
-const cors = require('cors');
-const path = require('path');
-require('dotenv').config();
+const cors    = require('cors');
+const path    = require('path');
+const dotenv = require('dotenv');
+dotenv.config();
 
-const BaseDeDatos = require('./Base_de_datos.js');
+const BaseDeDatos    = require('./Base_de_datos.js');
 const GeneradorPlanes = require('./GeneradorPlanes.js');
+const db         = new BaseDeDatos();
+const generadorPlanes = new GeneradorPlanes();
 
 const app = express();
-const PORT = process.env.PORT || 3001;
-
-// Middleware
 app.use(cors());
 app.use(express.json());
 
-// Servir archivos estáticos (para el frontend)
+//  🔹 Servir frontend desde carpeta ../frontend
 app.use(express.static(path.join(__dirname, '../frontend')));
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, '../frontend', 'index.html'));
+});
 
-// Inicializar clases
-const db = new BaseDeDatos();
-const generador = new GeneradorPlanes();
+const PORT = process.env.PORT || 3001;
 
 // ===== RUTAS DE LA API =====
 
 // Ruta de prueba
 app.get('/api/test', (req, res) => {
-  res.json({ message: 'API de Alimentación funcionando correctamente!' });
+  res.json({ ok: true });
 });
 
 // Obtener información de la base de datos
@@ -39,83 +40,127 @@ app.get('/api/info', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
-
-// Crear usuario
-app.post('/api/usuarios', async (req, res) => {
+app.get('/api/preferencias', async (req, res) => {
   try {
-    const { nombre, edad, peso, altura, sexo, nivelActividad, objetivo } = req.body;
-    
-    const usuarioId = await db.crearUsuario(nombre, edad, peso, altura, objetivo);
-    
-    // Actualizar campos adicionales
-    await db.ejecutarConsulta(
-      `UPDATE usuario SET sexo = ?, nivel_actividad = ? WHERE id = ?`,
-      [sexo, nivelActividad, usuarioId]
-    );
-    
-    res.json({ 
-      message: 'Usuario creado exitosamente', 
-      usuarioId 
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+    const resultados = await db.ejecutarConsulta('SELECT * FROM preferencias');
+    res.json(resultados);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error al obtener preferencias' });
   }
 });
 
-// Obtener usuario por nombre
-app.get('/api/usuarios/:nombre', async (req, res) => {
+app.get('/api/condiciones', async (req, res) => {
   try {
-    const usuario = await db.obtenerUsuarioPorNombre(req.params.nombre);
-    if (!usuario) {
-      return res.status(404).json({ error: 'Usuario no encontrado' });
+    const resultados = await db.ejecutarConsulta('SELECT * FROM condiciones_medicas');
+    res.json(resultados);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error al obtener condiciones médicas' });
+  }
+});
+// Crear usuario
+//  🔹 Ruta corregida para crear usuario y generar plan
+// server.js (fragmento corregido)
+app.post('/api/usuarios', async (req, res) => {
+  console.log('📥 POST /api/usuarios body:', req.body);
+
+  try {
+    const {
+      nombre, email, edad, peso, altura, sexo,
+      observaciones = '', preferencias = [], condiciones = []
+    } = req.body;
+
+    // 1. Crear usuario básico
+    const usuarioId = await db.crearUsuario(nombre, email, edad, peso, altura, sexo, observaciones);
+
+    // 2. Insertar preferencias
+    for (const prefId of preferencias.map(Number)) {
+      await db.ejecutarConsulta(
+          'INSERT INTO usuario_preferencias (usuario_id, preferencia_id) VALUES (?, ?)',
+          [usuarioId, prefId]
+      );
     }
-    res.json(usuario);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+
+    // 3. Insertar condiciones médicas
+    for (const condId of condiciones.map(Number)) {
+      await db.ejecutarConsulta(
+          'INSERT INTO usuario_condiciones (usuario_id, condicion_id) VALUES (?, ?)',
+          [usuarioId, condId]
+      );
+    }
+
+    // 4. Obtener usuario completo
+    const usuario = await db.obtenerUsuarioCompletoPorEmail(email);
+
+    // 5. Generar plan personalizado
+    const plan = await generadorPlanes.generarPlanPersonalizado(usuario);
+    console.log('✅ Plan generado con ID:', plan.id);
+
+    return res.json({ plan });
+
+  } catch (err) {
+    console.error('❌ Error en /api/usuarios:', err.message);
+    return res.status(500).json({ error: err.message });
   }
 });
 
 // Generar plan nutricional
-app.post('/api/generar-plan', async (req, res) => {
+app.get('/api/descargar-plan/:planId', async (req, res) => {
+  const planId = parseInt(req.params.planId, 10);
+  console.log(`⬇️ GET /api/descargar-plan/${planId}`);
   try {
-    const { nombre } = req.body;
-    
-    const usuario = await db.obtenerUsuarioPorNombre(nombre);
-    if (!usuario) {
-      return res.status(404).json({ error: 'Usuario no encontrado' });
-    }
-    
-    const plan = await generador.generarPlanPersonalizado(usuario);
-    
-    res.json({
-      message: 'Plan nutricional avanzado generado exitosamente',
-      plan
-    });
-  } catch (error) {
-    console.error('Error al generar plan:', error);
-    res.status(500).json({ error: error.message });
+    const planData = await generadorPlanes.obtenerPlanCompleto(planId);
+    console.log('📤 planData para descarga:', planData);
+    const json = JSON.stringify(planData, null, 2);
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename=plan_${planId}.json`);
+    return res.send(json);
+  } catch(err) {
+    console.error('❌ Error en /api/descargar-plan:', err);
+    return res.status(500).json({ error: 'No se pudo descargar el plan' });
   }
 });
 
+
 // Obtener análisis nutricional detallado de un alimento
 app.get('/api/alimentos/:codigo/analisis', async (req, res) => {
+  const { codigo } = req.params;
+  const cantidad = parseFloat(req.query.cantidad) || 100;
+
   try {
-    const { codigo } = req.params;
-    const { cantidad = 100 } = req.query;
-    
     const alimento = await db.obtenerAlimentoPorCodigo(codigo);
     if (!alimento) {
       return res.status(404).json({ error: 'Alimento no encontrado' });
     }
-    
-    const nutrientesCalculados = generador.calcularNutrientesTotales(alimento, parseFloat(cantidad));
-    
-    res.json({
-      alimento: nutrientesCalculados,
-      recomendaciones: generador.evaluarAlimento(nutrientesCalculados)
+
+    const analizado = generadorPlanes.calcularNutrientesTotales(alimento, cantidad);
+
+    // Ejemplo muy básico de análisis
+    const recomendaciones = {
+      fortalezas: [],
+      recomendaciones: [],
+      consideraciones: []
+    };
+
+    if (analizado.nutrientes.carbohidratos > 20) {
+      recomendaciones.fortalezas.push('Buena fuente de energía');
+    }
+    if (analizado.nutrientes.fibra > 1) {
+      recomendaciones.recomendaciones.push('Aporta algo de fibra');
+    }
+    if (analizado.nutrientes.sodio > 200) {
+      recomendaciones.consideraciones.push('Moderado contenido en sodio');
+    }
+
+    return res.json({
+      alimento: analizado,
+      recomendaciones
     });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+
+  } catch (err) {
+    console.error('❌ Error en /api/alimentos/:codigo/analisis:', err);
+    return res.status(500).json({ error: 'Error al analizar alimento' });
   }
 });
 
@@ -198,61 +243,6 @@ app.get('/api/estadisticas', async (req, res) => {
   }
 });
 
-// Buscar recomendaciones nutricionales personalizadas
-app.post('/api/recomendaciones', async (req, res) => {
-  try {
-    const { edad, peso, altura, sexo, actividad, objetivo, condiciones = [] } = req.body;
-    
-    const requerimientos = generador.calcularRequerimientosNutricionales(
-      edad, peso, altura, sexo, actividad, objetivo
-    );
-    
-    // Generar recomendaciones específicas
-    const recomendaciones = {
-      calorias: requerimientos.calorias,
-      macronutrientes: requerimientos.macronutrientes,
-      micronutrientes: requerimientos.micronutrientes,
-      alimentosRecomendados: [],
-      consejos: []
-    };
-    
-    // Agregar consejos personalizados
-    if (objetivo === 'perder') {
-      recomendaciones.consejos.push('Prioriza alimentos ricos en fibra para mayor saciedad');
-      recomendaciones.consejos.push('Incluye proteínas en cada comida para mantener la masa muscular');
-    } else if (objetivo === 'ganar') {
-      recomendaciones.consejos.push('Consume alimentos densos en calorías y nutrientes');
-      recomendaciones.consejos.push('Aumenta la frecuencia de comidas');
-    }
-    
-    if (sexo === 'F' && edad >= 15 && edad <= 50) {
-      recomendaciones.consejos.push('Asegúrate de consumir suficiente hierro para prevenir anemia');
-    }
-    
-    if (edad >= 50) {
-      recomendaciones.consejos.push('Aumenta el consumo de calcio y vitamina D para la salud ósea');
-    }
-    
-    // Buscar alimentos recomendados
-    const alimentosAltoHierro = await db.buscarAlimentosPorNutriente('hierro', 3, 5);
-    const alimentosAltoCalcio = await db.buscarAlimentosPorNutriente('calcio', 200, 5);
-    const alimentosBalanceados = await db.obtenerAlimentosBalanceados(10);
-    
-    recomendaciones.alimentosRecomendados = [
-      ...alimentosAltoHierro.slice(0, 3),
-      ...alimentosAltoCalcio.slice(0, 3),
-      ...alimentosBalanceados.slice(0, 4)
-    ];
-    
-    res.json({
-      message: 'Recomendaciones nutricionales personalizadas',
-      recomendaciones
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
 // Obtener plan completo
 app.get('/api/planes/:planId', async (req, res) => {
   try {
@@ -288,11 +278,6 @@ app.get('/api/alimentos/calorias/:min/:max', async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
-});
-
-// Página principal (frontend)
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, '../frontend/index.html'));
 });
 
 // Manejo de errores

@@ -4,173 +4,193 @@ const API_BASE = '/api';
 /* =========================================================
    EVENTO INICIAL – cargar info de BD y registrar el formulario
    ========================================================= */
-document.addEventListener('DOMContentLoaded', async () => {
-  // 1) Obtener estado de la base de datos
-  await cargarInfoDB();
-
-  // 2) Interceptar envío del formulario
-  document.getElementById('userForm').addEventListener('submit', async (e) => {
+document.getElementById('form').addEventListener('submit', async e => {
+    console.log('🚀 submit handler arrancó');
     e.preventDefault();
+    limpiarAlertas();
+    mostrarLoading(true);
 
-    const formData = new FormData(e.target);
-    const userData = {
-      nombre:          formData.get('nombre'),
-      edad:            parseInt(formData.get('edad')),
-      peso:            parseFloat(formData.get('peso')),
-      altura:          parseFloat(formData.get('altura')),
-      sexo:            formData.get('sexo'),
-      nivelActividad:  formData.get('nivelActividad'),
-      objetivo:        formData.get('objetivo')
-    };
+    const form  = e.target;
+    const datos = Object.fromEntries(new FormData(form).entries());
+    datos.preferencias = [...form.querySelectorAll('input[name="preferencias"]:checked')].map(cb => cb.value);
+    datos.condiciones  = [...form.querySelectorAll('input[name="condiciones"]:checked')].map(cb => cb.value);
 
-    await procesarUsuario(userData);
-  });
+    console.log('📋 datos a enviar:', datos);
+
+    try {
+        console.log('🔗 POST /api/usuarios …');
+        const res = await fetch(`${API_BASE}/usuarios`, {
+            method : 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body   : JSON.stringify(datos)
+        });
+
+        const resJson = await res.json();
+        if (!res.ok) throw new Error(resJson.error || 'Error al crear usuario');
+
+        const plan = resJson.plan;
+        if (!plan) throw new Error('No se recibió un plan');
+
+        currentPlanId = plan.id;
+        console.log('📦 plan recibido:', plan);
+        console.log('🧾 Días generados:', Object.keys(plan.planSemanal || {}));
+        console.log('📊 Promedio semanal:', plan.promedioSemanal);
+        console.log('🍽️ Día Lunes:', plan.planSemanal?.Lunes);
+
+        if (plan.planSemanal) {
+            mostrarPlanSemanal(plan);
+        } else {
+            mostrarPlan(plan);
+        }
+
+        form.reset();
+    } catch (err) {
+        console.error('❌ Error en submit handler:', err);
+        mostrarAlerta('error', `Error: ${err.message}`);
+    } finally {
+        mostrarLoading(false);
+        console.log('✅ submit handler finalizado');
+    }
 });
 
 /* =========================================================
    SECCIÓN UI – PLAN SEMANAL Y PLAN DIARIO
    ========================================================= */
 
-// ---------- PLAN SEMANAL ----------
-function mostrarPlanSemanal(planSemanal) {
-  const resultadosDiv = document.getElementById('resultados');
-  const contentDiv    = document.getElementById('plan-content');
+// Muestra el resumen semanal + pestañas de días
+/* =======================================================================
+   Funciones de UI corregidas para mostrar plan semanal y diario
+   ======================================================================= */
 
-  let html = `
-    <div class="plan-summary fade-in">
-      <div class="row mb-4">
-        <div class="col-md-4">
+/**
+ * Muestra el plan semanal completo:
+ * - Resumen semanal
+ * - Pestañas para cada día
+ * - Detalle del primer día por defecto
+ */
+function mostrarPlanSemanal(plan) {
+    console.log('🔍 plan recibido en mostrarPlanSemanal:', plan);
+
+    const dias = Object.keys(plan.planSemanal || {});
+    if (!dias.length) {
+        console.warn('⚠️ El planSemanal está vacío');
+        return;
+    }
+    if (!plan?.planSemanal || Object.keys(plan.planSemanal).length === 0) {
+        mostrarAlerta('warning','Plan semanal no disponible');
+        return;
+    }
+
+    const resultadosDiv = document.getElementById('resultados');
+    const contentDiv    = document.getElementById('plan-content');
+    resultadosDiv.style.display = 'block';
+
+    // --- 1) Resumen superior: calorías & días (sin puntuación semanal) ---
+    const avgCal    = plan.promedioSemanal?.calorias    ?? 0;
+    const reqCal    = plan.requerimientos?.calorias      ?? 0;
+    const totalDias = Object.keys(plan.planSemanal).length;
+
+    let html = `
+    <div class="plan-summary mb-4 fade-in">
+      <div class="row text-center g-3">
+        <div class="col-md-6">
           <div class="card bg-primary text-white">
             <div class="card-body">
               <h5><i class="fas fa-fire"></i> Calorías Promedio Diario</h5>
-              <h2>${planSemanal.promedioSemanal.calorias} kcal</h2>
-              <small>Objetivo: ${planSemanal.requerimientos.calorias} kcal</small>
+              <h2>${avgCal} kcal</h2>
+              <small>Objetivo: ${reqCal} kcal</small>
             </div>
           </div>
         </div>
-        <div class="col-md-4">
-          <div class="card bg-success text-white">
-            <div class="card-body">
-              <h5><i class="fas fa-chart-pie"></i> Puntuación Semanal</h5>
-              <h2>${planSemanal.cumplimientoSemanal.general}%</h2>
-              <small>Cumplimiento nutricional</small>
-            </div>
-          </div>
-        </div>
-        <div class="col-md-4">
+        <div class="col-md-6">
           <div class="card bg-info text-white">
             <div class="card-body">
-              <h5><i class="fas fa-calendar-week"></i> Plan Semanal</h5>
-              <h2>7 días</h2>
-              <small>Menú completo</small>
+              <h5><i class="fas fa-calendar-week"></i> Días</h5>
+              <h2>${totalDias} días</h2>
+              <small>Completos</small>
             </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Navegación por días -->
-      <div class="card mb-4">
-        <div class="card-header">
-          <h5><i class="fas fa-calendar"></i> Seleccionar Día de la Semana</h5>
-        </div>
-        <div class="card-body">
-          <div class="btn-group w-100" role="group">
-            ${Object.keys(planSemanal.planSemanal).map((dia, idx) => `
-              <button type="button"
-                      class="btn btn-outline-primary dia-btn ${idx === 0 ? 'active' : ''}"
-                      onclick="mostrarDia('${dia}')"
-                      data-dia="${dia}">
-                ${dia}
-              </button>
-            `).join('')}
           </div>
         </div>
       </div>
     </div>
 
-    <!-- Contenedor del día seleccionado -->
+    <!-- Tabs de días -->
+    <ul class="nav nav-tabs mb-3" id="dias-tab"></ul>
     <div id="dia-content"></div>
   `;
 
-  contentDiv.innerHTML          = html;
-  resultadosDiv.style.display   = 'block';
+    contentDiv.innerHTML = html;
 
-  // Guardar en global para acceso rápido
-  window.currentPlanSemanal = planSemanal;
+    // 2) Crear pestañas
+    const diasTab = document.getElementById('dias-tab');
+    Object.keys(plan.planSemanal).forEach((dia,i) => {
+        const li = document.createElement('li');
+        li.className = 'nav-item';
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = `nav-link ${i===0?'active':''}`;
+        btn.textContent = dia;
+        btn.onclick = () => {
+            diasTab.querySelectorAll('.nav-link').forEach(x=>x.classList.remove('active'));
+            btn.classList.add('active');
+            mostrarDia(plan.planSemanal[dia], dia);
+        };
+        li.appendChild(btn);
+        diasTab.appendChild(li);
+    });
 
-  // Mostrar primer día por defecto
-  mostrarDia(Object.keys(planSemanal.planSemanal)[0]);
+    // 3) Mostrar primer día
+    mostrarDia(plan.planSemanal[ Object.keys(plan.planSemanal)[0] ],
+        Object.keys(plan.planSemanal)[0]);
 }
 
-// ---------- DÍA ESPECÍFICO DE PLAN SEMANAL ----------
-function mostrarDia(dia) {
-  const planSemanal = window.currentPlanSemanal;
-  const planDiario  = planSemanal.planSemanal[dia];
+/**
+ * Muestra el detalle de un día concreto (desayuno, almuerzo, snacks, cena)
+ */
+function mostrarDia(detalles={}, diaNombre='') {
+    const diaContent = document.getElementById('dia-content');
+    const resumen    = detalles.resumenNutricional || {};
+    const cumple     = detalles.cumplimiento     || {};
+    const comidas    = detalles.comidas          || {};
 
-  // Actualizar botón activo
-  document.querySelectorAll('.dia-btn').forEach(btn => btn.classList.remove('active'));
-  document.querySelector(`[data-dia="${dia}"]`).classList.add('active');
-
-  const diaContentDiv = document.getElementById('dia-content');
-  let html = `
+    let html = `
     <div class="day-plan fade-in">
-      <h3 class="mb-4">
-        <i class="fas fa-calendar-day"></i> ${dia}
-        <span class="badge bg-primary ms-2">${planDiario.resumenNutricional.calorias} kcal</span>
-        <span class="badge bg-success ms-1">${planDiario.cumplimiento.general}% cumplimiento</span>
-      </h3>
-      <div class="row">
+      <h4>
+        <i class="fas fa-calendar-day"></i> ${diaNombre}
+        <span class="badge bg-primary ms-2">${resumen.calorias ?? 0} kcal</span>
+      </h4>
+      <div class="row gy-4">
   `;
 
-  // Renderizar cada comida
-  for (const [comida, detalles] of Object.entries(planDiario.comidas)) {
-    html += `
-      <div class="col-lg-6 mb-4">
+    ['desayuno','almuerzo','snacks','cena'].forEach(tipo => {
+        const det = comidas[tipo] || {};
+        const nut = det.nutrientesReales || {};
+        const als = Array.isArray(det.alimentos) ? det.alimentos : [];
+
+        html += `
+      <div class="col-lg-6">
         <div class="card meal-card">
-          <div class="card-header meal-header-${comida}">
-            <h5>${obtenerIconoComida(comida)} ${comida.charAt(0).toUpperCase() + comida.slice(1)}</h5>
+          <div class="card-header meal-header-${tipo}">
+            <h5>${obtenerIconoComida(tipo)} ${tipo.charAt(0).toUpperCase()+tipo.slice(1)}</h5>
             <div class="meal-stats">
-              <span class="badge bg-light text-dark">${detalles.nutrientesReales.calorias || 0} kcal</span>
-              <span class="badge bg-info">${detalles.nutrientesReales.proteinas || 0}g prot</span>
+              <span class="badge bg-light text-dark">${nut.calorias   ?? 0} kcal</span>
+              <span class="badge bg-info">${nut.proteinas  ?? 0}g prot</span>
             </div>
           </div>
           <div class="card-body">
-            ${detalles.alimentos.map(alimento => `
-              <div class="alimento-item">
-                <div class="d-flex justify-content-between align-items-center">
+            ${als.map(al => `
+              <div class="alimento-item mb-2">
+                <div class="d-flex justify-content-between">
                   <div>
-                    <strong>${alimento.nombre}</strong>
-                    <small class="text-muted d-block">${alimento.cantidad}g</small>
+                    <strong>${al.nombre}</strong>
+                    <small class="text-muted d-block">${al.cantidad}g</small>
                   </div>
-                  <div class="text-end">
-                    <span class="badge bg-primary">${alimento.nutrientes.calorias} kcal</span>
+                  <div>
+                    <span class="badge bg-primary">${al.nutrientes.calorias ?? 0} kcal</span>
                     <button class="btn btn-sm btn-outline-info ms-2"
-                            onclick="mostrarDetalleAlimento('${alimento.codigo}', ${alimento.cantidad})">
+                            onclick="mostrarDetalleAlimento(${al.codigo}, ${al.cantidad})">
                       <i class="fas fa-info-circle"></i>
                     </button>
-                  </div>
-                </div>
-                <div class="nutrient-mini-bars mt-2">
-                  <div class="mini-bar">
-                    <small>Proteínas: ${alimento.nutrientes.proteinas}g</small>
-                    <div class="progress progress-sm">
-                      <div class="progress-bar bg-success"
-                           style="width:${(alimento.nutrientes.proteinas / 50) * 100}%"></div>
-                    </div>
-                  </div>
-                  <div class="mini-bar">
-                    <small>Carbohidratos: ${alimento.nutrientes.carbohidratos}g</small>
-                    <div class="progress progress-sm">
-                      <div class="progress-bar bg-warning"
-                           style="width:${(alimento.nutrientes.carbohidratos / 100) * 100}%"></div>
-                    </div>
-                  </div>
-                  <div class="mini-bar">
-                    <small>Grasas: ${alimento.nutrientes.grasas}g</small>
-                    <div class="progress progress-sm">
-                      <div class="progress-bar bg-danger"
-                           style="width:${(alimento.nutrientes.grasas / 30) * 100}%"></div>
-                    </div>
                   </div>
                 </div>
               </div>
@@ -179,213 +199,27 @@ function mostrarDia(dia) {
         </div>
       </div>
     `;
-  }
+    });
 
-  diaContentDiv.innerHTML = html + '</div></div>';
+    html += `</div></div>`;
+    diaContent.innerHTML = html;
 }
 
-// ---------- PLAN DIARIO COMPLETO ----------
+/**
+ * Fallback para mostrar un plan diario individual
+ */
 function mostrarPlan(plan) {
-  const resultadosDiv = document.getElementById('resultados');
-  const contentDiv    = document.getElementById('plan-content');
-
-  let html = `
-    <div class="plan-summary fade-in">
-      <div class="row mb-4">
-        <div class="col-md-6">
-          <div class="card bg-primary text-white">
-            <div class="card-body">
-              <h5><i class="fas fa-fire"></i> Calorías Diarias</h5>
-              <h2>${plan.requerimientos.calorias} kcal</h2>
-              <small>Real: ${plan.resumenNutricional.calorias} kcal</small>
-            </div>
-          </div>
-        </div>
-        <div class="col-md-6">
-          <div class="card bg-success text-white">
-            <div class="card-body">
-              <h5><i class="fas fa-chart-pie"></i> Puntuación General</h5>
-              <h2>${plan.cumplimiento.general}%</h2>
-              <small>Cumplimiento nutricional</small>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Macronutrientes -->
-      <div class="card mb-4">
-        <div class="card-header">
-          <h5><i class="fas fa-chart-bar"></i> Distribución de Macronutrientes</h5>
-        </div>
-        <div class="card-body">
-          <div class="row">
-            <div class="col-md-4">
-              <div class="text-center">
-                <div class="progress-circle"
-                     data-percent="${plan.cumplimiento.macronutrientes.proteinas.porcentaje}">
-                  <span class="progress-text">
-                    <strong>${plan.resumenNutricional.proteinas}g</strong><br>
-                    <small>Proteínas</small>
-                  </span>
-                </div>
-                <p class="mt-2 small">Objetivo: ${plan.requerimientos.macronutrientes.proteinas}g</p>
-              </div>
-            </div>
-            <div class="col-md-4">
-              <div class="text-center">
-                <div class="progress-circle"
-                     data-percent="${plan.cumplimiento.macronutrientes.carbohidratos.porcentaje}">
-                  <span class="progress-text">
-                    <strong>${plan.resumenNutricional.carbohidratos}g</strong><br>
-                    <small>Carbohidratos</small>
-                  </span>
-                </div>
-                <p class="mt-2 small">Objetivo: ${plan.requerimientos.macronutrientes.carbohidratos}g</p>
-              </div>
-            </div>
-            <div class="col-md-4">
-              <div class="text-center">
-                <div class="progress-circle"
-                     data-percent="${plan.cumplimiento.macronutrientes.grasas.porcentaje}">
-                  <span class="progress-text">
-                    <strong>${plan.resumenNutricional.grasas}g</strong><br>
-                    <small>Grasas</small>
-                  </span>
-                </div>
-                <p class="mt-2 small">Objetivo: ${plan.requerimientos.macronutrientes.grasas}g</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Micronutrientes -->
-      <div class="card mb-4">
-        <div class="card-header">
-          <h5><i class="fas fa-pills"></i> Micronutrientes Clave</h5>
-        </div>
-        <div class="card-body">
-          <div class="row">
-            ${generarMicronutrientes(plan.cumplimiento.micronutrientes,
-                                     plan.resumenNutricional.micronutrientes)}
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="row">
-  `;
-
-  /* ---------- COMIDAS ---------- */
-  for (const [comida, detalles] of Object.entries(plan.comidas)) {
-    html += `
-      <div class="col-lg-6 mb-4">
-        <div class="card meal-card">
-          <div class="card-header meal-header-${comida}">
-            <h5>${obtenerIconoComida(comida)} ${comida.charAt(0).toUpperCase() + comida.slice(1)}</h5>
-            <div class="meal-stats">
-              <span class="badge bg-light text-dark">
-                ${detalles.nutrientesReales.calorias || 0} kcal
-              </span>
-              <span class="badge bg-info">
-                ${detalles.nutrientesReales.proteinas || 0}g prot
-              </span>
-            </div>
-          </div>
-          <div class="card-body">
-            ${detalles.alimentos.map(alimento => `
-              <div class="alimento-item">
-                <div class="d-flex justify-content-between align-items-center">
-                  <div>
-                    <strong>${alimento.nombre}</strong>
-                    <small class="text-muted d-block">${alimento.cantidad}g</small>
-                  </div>
-                  <div class="text-end">
-                    <span class="badge bg-primary">${alimento.nutrientes.calorias} kcal</span>
-                    <button class="btn btn-sm btn-outline-info ms-2"
-                            onclick="mostrarDetalleAlimento('${alimento.codigo}', ${alimento.cantidad})">
-                      <i class="fas fa-info-circle"></i>
-                    </button>
-                  </div>
-                </div>
-                <div class="nutrient-mini-bars mt-2">
-                  <div class="mini-bar">
-                    <small>Proteínas: ${alimento.nutrientes.proteinas}g</small>
-                    <div class="progress progress-sm">
-                      <div class="progress-bar bg-success"
-                           style="width:${(alimento.nutrientes.proteinas / detalles.targets.proteinas) * 100}%"></div>
-                    </div>
-                  </div>
-                  <div class="mini-bar">
-                    <small>Carbohidratos: ${alimento.nutrientes.carbohidratos}g</small>
-                    <div class="progress progress-sm">
-                      <div class="progress-bar bg-warning"
-                           style="width:${(alimento.nutrientes.carbohidratos / detalles.targets.carbohidratos) * 100}%"></div>
-                    </div>
-                  </div>
-                  <div class="mini-bar">
-                    <small>Grasas: ${alimento.nutrientes.grasas}g</small>
-                    <div class="progress progress-sm">
-                      <div class="progress-bar bg-danger"
-                           style="width:${(alimento.nutrientes.grasas / detalles.targets.grasas) * 100}%"></div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            `).join('')}
-
-            <!-- Análisis -->
-            <div class="meal-analysis mt-3">
-              <h6>Análisis Nutricional:</h6>
-              <div class="row">
-                <div class="col-6">
-                  <small class="text-success">Logrado:</small>
-                  <ul class="small mb-0">
-                    ${Object.entries(detalles.analisis)
-                             .filter(([_, v]) => v.cumple)
-                             .map(([k, v]) => `<li>${k}: ${v.porcentaje}%</li>`)
-                             .join('')}
-                  </ul>
-                </div>
-                <div class="col-6">
-                  <small class="text-warning">A mejorar:</small>
-                  <ul class="small mb-0">
-                    ${Object.entries(detalles.analisis)
-                             .filter(([_, v]) => !v.cumple)
-                             .map(([k, v]) => `<li>${k}: ${v.porcentaje}%</li>`)
-                             .join('')}
-                  </ul>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    `;
-  }
-
-  /* ---------- BOTONES ----------- */
-  html += `
-    </div>
-    <div class="text-center mt-4">
-      <button class="btn btn-success btn-lg me-3" onclick="regenerarPlan()">
-        <i class="fas fa-refresh"></i> Generar Nuevo Plan
-      </button>
-      <button class="btn btn-info btn-lg me-3" onclick="descargarPlan()">
-        <i class="fas fa-download"></i> Descargar PDF
-      </button>
-      <button class="btn btn-outline-primary btn-lg" onclick="compartirPlan()">
-        <i class="fas fa-share"></i> Compartir
-      </button>
-    </div>
-  `;
-
-  contentDiv.innerHTML        = html;
-  resultadosDiv.style.display = 'block';
-  initProgressCircles();
-  resultadosDiv.scrollIntoView({ behavior: 'smooth' });
+    if (!plan) {
+        mostrarAlerta('warning','Plan diario no disponible');
+        return;
+    }
+    if (plan.planSemanal) {
+        mostrarPlanSemanal(plan);
+    } else {
+        // Reutilizamos la vista de un solo día:
+        mostrarDia(plan, 'Hoy');
+    }
 }
-
 /* =========================================================
    SECCIÓN PETICIONES / LÓGICA DE NEGOCIO
    ========================================================= */
@@ -402,35 +236,28 @@ async function cargarInfoDB() {
     dbInfo.className = 'alert alert-warning';
   }
 }
-
 async function procesarUsuario(userData) {
-  mostrarLoading(true);
-  limpiarAlertas();
-
-  try {
-    await crearUsuario(userData);
-
-    const planRes = await fetch(`${API_BASE}/generar-plan`, {
-      method : 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body   : JSON.stringify({ nombre: userData.nombre })
-    });
-
-    if (!planRes.ok) throw new Error('Error al generar plan nutricional');
-    const planData = await planRes.json();
-
-    if (planData.plan.planSemanal) {
-      mostrarPlanSemanal(planData.plan);
-    } else {
-      mostrarPlan(planData.plan);
+    console.log('📝 procesarUsuario', userData);
+    mostrarLoading(true);
+    try {
+        const resUser = await fetch(`${API_BASE}/usuarios`, {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify(userData)
+        });
+        console.log('📤 /api/usuarios status', resUser.status);
+        const result = await resUser.json();
+        const plan = result.plan;
+        if (!plan || !plan.id) throw new Error('Plan no recibido');
+        currentPlanId = plan.id;
+        console.log('🔖 Plan ID guardado:', currentPlanId);
+        mostrarPlan(plan);
+    } catch(err) {
+        console.error('❌ procesarUsuario error:', err);
+        mostrarAlerta('error', err.message);
+    } finally {
+        mostrarLoading(false);
     }
-  } catch (err) {
-    mostrarAlerta('error', `Error: ${err.message}`);
-  } finally {
-    mostrarLoading(false);
-  }
 }
-
 async function crearUsuario(userData) {
   const res = await fetch(`${API_BASE}/usuarios`, {
     method : 'POST',
@@ -543,13 +370,20 @@ function obtenerIconoComida(comida) {
 
 /* -------- detalle alimento -------- */
 async function mostrarDetalleAlimento(codigo, cantidad) {
-  try {
-    const res  = await fetch(`${API_BASE}/alimentos/${codigo}/analisis?cantidad=${cantidad}`);
-    const data = await res.json();
-    mostrarModalAlimento(data.alimento, data.recomendaciones);
-  } catch (err) {
-    mostrarAlerta('error', 'Error al cargar información del alimento');
-  }
+    console.log(`ℹ️ solicitar análisis ${codigo} x${cantidad}g`);
+    mostrarLoading(true);
+    try {
+        const res = await fetch(`${API_BASE}/alimentos/${codigo}/analisis?cantidad=${cantidad}`);
+        console.log('📤 análisis status', res.status);
+        const data = await res.json();
+        console.log('🔍 análisis datos', data);
+        mostrarModalAlimento(data.alimento, data.recomendaciones);
+    } catch(err) {
+        console.error('❌ mostrarDetalleAlimento error:', err);
+        mostrarAlerta('error', 'Error al cargar información del alimento');
+    } finally {
+        mostrarLoading(false);
+    }
 }
 
 function mostrarModalAlimento(alimento, recomendaciones) {
@@ -628,11 +462,17 @@ function mostrarModalAlimento(alimento, recomendaciones) {
             </div>
             ${recomendaciones ? `
             <div class="mt-3">
-              <h6><i class="fas fa-lightbulb text-warning"></i> Evaluación Nutricional</h6>
-              <div class="alert alert-${recomendaciones.categoria === 'Excelente' ? 'success' : recomendaciones.categoria === 'Bueno' ? 'info' : recomendaciones.categoria === 'Regular' ? 'warning' : recomendaciones.categoria === 'Procesado' ? 'danger' : 'secondary'}">
-                <strong>${recomendaciones.categoria}</strong> - Puntuación: ${recomendaciones.puntuacion}/100
-                ${recomendaciones.descripcion ? `<br><small>${recomendaciones.descripcion}</small>` : ''}
-              </div>
+              ${recomendaciones.categoria && recomendaciones.puntuacion !== undefined ? `
+  <h6><i class="fas fa-lightbulb text-warning"></i> Evaluación Nutricional</h6>
+  <div class="alert alert-${recomendaciones.categoria === 'Excelente' ? 'success' :
+      recomendaciones.categoria === 'Bueno' ? 'info' :
+          recomendaciones.categoria === 'Regular' ? 'warning' :
+              recomendaciones.categoria === 'Procesado' ? 'danger' :
+                  'secondary'}">
+    <strong>${recomendaciones.categoria}</strong> - Puntuación: ${recomendaciones.puntuacion}/100
+    ${recomendaciones.descripcion ? `<br><small>${recomendaciones.descripcion}</small>` : ''}
+  </div>
+` : ''}
               
               ${recomendaciones.fortalezas && recomendaciones.fortalezas.length > 0 ? `
               <div class="card mb-2">
@@ -681,6 +521,34 @@ function mostrarModalAlimento(alimento, recomendaciones) {
   document.body.insertAdjacentHTML('beforeend', modalHtml);
   new bootstrap.Modal(document.getElementById('alimentoModal')).show();
 }
+async function cargarPreferencias() {
+    const res = await fetch('/api/preferencias');
+    const preferencias = await res.json();
+    const contenedor = document.getElementById('preferencias-lista');
+    contenedor.innerHTML = '';
+    preferencias.forEach(pref => {
+        contenedor.innerHTML += `
+      <label><input type="checkbox" name="preferencias" value="${pref.id}"> ${pref.nombre}</label><br>
+    `;
+    });
+}
+
+async function cargarCondiciones() {
+    const res = await fetch('/api/condiciones');
+    const condiciones = await res.json();
+    const contenedor = document.getElementById('condiciones-lista');
+    contenedor.innerHTML = '';
+    condiciones.forEach(cond => {
+        contenedor.innerHTML += `
+      <label><input type="checkbox" name="condiciones" value="${cond.id}"> ${cond.nombre}</label><br>
+    `;
+    });
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    cargarPreferencias();
+    cargarCondiciones();
+});
 
 /* -------- círculos de progreso -------- */
 function initProgressCircles() {
@@ -701,8 +569,26 @@ function initProgressCircles() {
 }
 
 /* -------- acciones “placeholder” -------- */
-function descargarPlan() {
-  mostrarAlerta('info', 'Función de descarga en desarrollo. Próximamente podrás descargar tu plan en PDF.');
+async function descargarPlan() {
+    console.log('⬇️ descargarPlan invoked');
+    mostrarLoading(true);
+    try {
+        if (!currentPlanId) throw new Error('Plan ID no definido');
+        const res = await fetch(`${API_BASE}/descargar-plan/${currentPlanId}`);
+        console.log('📤 descargar-plan status', res.status);
+        if (!res.ok) throw new Error(`Status ${res.status}`);
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href=url;
+        a.download = `plan_${currentPlanId}.json`;
+        document.body.appendChild(a);
+        a.click(); a.remove();
+        URL.revokeObjectURL(url);
+        console.log('✅ descarga iniciada');
+    } catch(err) {
+        console.error('❌ descargarPlan error:', err);
+        mostrarAlerta('error', `Error descarga: ${err.message}`);
+    } finally { mostrarLoading(false); }
 }
 
 function compartirPlan() {
@@ -718,7 +604,10 @@ function compartirPlan() {
       .catch(() => mostrarAlerta('info', 'Copia este enlace: ' + window.location.href));
   }
 }
-
+document.addEventListener('DOMContentLoaded', () => {
+    const cards = document.querySelectorAll('.card.bg-success.text-white');
+    cards.forEach(c=>c.remove());
+});
 /* -------- regenerar (alias a generarNuevoPlan para compat.) -------- */
 function regenerarPlan() {
   generarNuevoPlan();

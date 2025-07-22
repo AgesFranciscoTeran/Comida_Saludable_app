@@ -1,5 +1,5 @@
 const mysql = require('mysql2/promise');
-require('dotenv').config();
+require('dotenv').config(); // ✅ Cargar .env
 
 class BaseDeDatos {
   constructor() {
@@ -15,7 +15,12 @@ class BaseDeDatos {
       enableKeepAlive: true,
       keepAliveInitialDelay: 0
     };
-    
+    console.log("Variables de entorno:");
+    console.log("HOST:", process.env.MYSQLHOST);
+    console.log("USER:", process.env.MYSQLUSER);
+    console.log("PASS:", process.env.MYSQLPASSWORD ? '***' : 'MISSING');
+    console.log("DATABASE:", process.env.MYSQLDATABASE);
+    console.log("PORT:", process.env.MYSQLPORT);
     // Crear pool de conexiones
     this.pool = mysql.createPool(this.config);
   }
@@ -109,9 +114,9 @@ class BaseDeDatos {
     let connection;
     try {
       connection = await this.pool.getConnection();
-      
-      const [resultados] = await connection.execute(sql, params);
-      return resultados;
+
+      const [result] = await connection.execute(sql, params);
+      return result;
     } catch (error) {
       console.error('Error al ejecutar consulta SQL:', error.message);
       throw error;
@@ -121,19 +126,13 @@ class BaseDeDatos {
   }
 
   // ===== MÉTODOS PARA USUARIOS =====
-  async crearUsuario(nombre, edad, peso, altura, objetivo = 'mantener') {
+  async crearUsuario(nombre, email, edad, peso, altura, sexo, observaciones = null) {
     let connection;
     try {
       connection = await this.pool.getConnection();
-      
-      // Incluir email con valor por defecto único para compatibilidad con la BD
-      const timestamp = Date.now();
-      const emailDefault = `${nombre.toLowerCase().replace(/\s+/g, '')}${timestamp}@temp.com`;
-      const sql = `INSERT INTO usuario (nombre, email, edad, peso, altura, objetivo) 
-                   VALUES (?, ?, ?, ?, ?, ?)`;
-      const [resultado] = await connection.execute(sql, [nombre, emailDefault, edad, peso, altura, objetivo]);
-      
-      console.log(`Usuario creado con ID: ${resultado.insertId}`);
+      const sql = `INSERT INTO usuario (nombre, email, edad, peso, altura, sexo, observaciones)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)`;
+      const [resultado] = await connection.execute(sql, [nombre, email, edad, peso, altura, sexo, observaciones]);
       return resultado.insertId;
     } catch (error) {
       console.error('Error al crear usuario:', error.message);
@@ -156,6 +155,68 @@ class BaseDeDatos {
     } catch (error) {
       console.error('Error al obtener usuario:', error.message);
       throw error;
+    } finally {
+      if (connection) connection.release();
+    }
+  }
+  async obtenerUsuarioPorEmail(email) {
+    let connection;
+    try {
+      connection = await this.pool.getConnection();
+      const [rows] = await connection.execute(
+          `SELECT * 
+         FROM usuario 
+        WHERE email = ? 
+        ORDER BY id DESC 
+        LIMIT 1`,
+          [email]
+      );
+      return rows[0] || null;
+    } catch (err) {
+      console.error('Error en obtenerUsuarioPorEmail:', err);
+      throw err;
+    } finally {
+      if (connection) connection.release();
+    }
+  }
+  async obtenerUsuarioCompletoPorEmail(email) {
+    let connection;
+    try {
+      connection = await this.pool.getConnection();
+      // 1) Datos básicos
+      const [users] = await connection.execute(
+          `SELECT *
+           FROM usuario
+           WHERE email = ?
+           ORDER BY id DESC
+           LIMIT 1`,
+          [email]
+      );
+      const usuario = users[0];
+      if (!usuario) return null;
+
+      // 2) Array de preferencias
+      const [prefs] = await connection.execute(
+          `SELECT preferencia_id
+           FROM usuario_preferencias
+           WHERE usuario_id = ?`,
+          [usuario.id]
+      );
+      usuario.preferencias = prefs.map(r => r.preferencia_id);
+
+      // 3) Array de condiciones
+      const [conds] = await connection.execute(
+          `SELECT condicion_id
+           FROM usuario_condiciones
+           WHERE usuario_id = ?`,
+          [usuario.id]
+      );
+      usuario.condiciones = conds.map(r => r.condicion_id);
+
+      return usuario;
+    } catch (err) {
+      console.error('Error en obtenerUsuarioCompletoPorEmail:', err);
+      throw err;
     } finally {
       if (connection) connection.release();
     }
@@ -400,13 +461,59 @@ class BaseDeDatos {
       if (connection) connection.release();
     }
   }
+  // backend/Base_de_datos.js
+  async obtenerAlimentosFiltrados(preferencias = [], condiciones = [], limite = 10) {
+    // Asegurarnos de que sean números
+    preferencias = (preferencias || []).map(Number);
+    condiciones = (condiciones || []).map(Number);
+
+    const connection = await this.pool.getConnection();
+    try {
+      // 1) SQL base
+      let sql    = 'SELECT a.* FROM alimentos a WHERE energia_kcal > 0';
+      const params = [];
+
+      // 2) Filtrar preferencias (un solo ? que recibirá un array)
+      if (preferencias.length) {
+        sql += `
+        AND NOT EXISTS (
+          SELECT 1
+            FROM alimento_preferencia ap
+           WHERE ap.alimento_codigo = a.codigo
+             AND ap.preferencia_id IN (?))
+      `;
+        params.push(preferencias);
+      }
+
+      // 3) Filtrar condiciones
+      if (condiciones.length) {
+        sql += `
+        AND NOT EXISTS (
+          SELECT 1
+            FROM alimento_condicion ac
+           WHERE ac.alimento_codigo = a.codigo
+             AND ac.condicion_id IN (?))
+      `;
+        params.push(condiciones);
+      }
+
+      // 4) Limitar resultados
+      sql += ' ORDER BY RAND() LIMIT ?';
+      params.push(limite);
+
+      // 5) Usamos query() para que expanda los arrays en IN (?)
+      const [alimentos] = await connection.query(sql, params);
+      return alimentos;
+
+    } catch (err) {
+      console.error('Error al obtener alimentos filtrados:', err.message);
+      throw err;
+    } finally {
+      connection.release();
+    }
+  }
 }
 
 // Exportar la clase para usar en otros archivos
 module.exports = BaseDeDatos;
 
-// Si se ejecuta directamente este archivo, explorar la base de datos
-if (require.main === module) {
-  const db = new BaseDeDatos();
-  db.explorarTodasLasTablas();
-}
