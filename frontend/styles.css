@@ -49,6 +49,42 @@ body {
     border: none;
 }
 
+/* Estilos para advertencias de inventario */
+.alimento-item.border-warning {
+    border-radius: 8px;
+    padding: 8px;
+    background-color: rgba(255, 193, 7, 0.1);
+}
+
+.badge.bg-warning {
+    color: #212529 !important;
+}
+
+.alert-warning {
+    background-color: rgba(255, 193, 7, 0.1);
+    border-left: 4px solid #ffc107;
+}
+
+.text-warning {
+    color: #d39e00 !important;
+}
+
+.inventory-warning {
+    font-size: 0.85em;
+    margin-top: 4px;
+}
+
+.meal-card .card-header .badge.bg-warning {
+    font-size: 0.7em;
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.6; }
+    100% { opacity: 1; }
+}
+
 /* Estilos para el plan nutricional mejorado */
 .plan-summary {
     animation: fadeInUp 0.6s ease-out;

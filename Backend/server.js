@@ -32,12 +32,113 @@ app.get('/api/test', (req, res) => {
 app.get('/api/info', async (req, res) => {
   try {
     const totalAlimentos = await db.contarAlimentos();
+    const resumenInventario = await db.obtenerResumenInventario();
+    const totalInventario = resumenInventario.length;
+    
     res.json({
       totalAlimentos,
+      totalAlimentosConInventario: totalInventario,
       mensaje: 'Base de datos conectada correctamente'
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+// Obtener resumen del inventario
+app.get('/api/inventario', async (req, res) => {
+  try {
+    const resumen = await db.obtenerResumenInventario();
+    res.json(resumen);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Verificar disponibilidad de un alimento en inventario
+app.get('/api/inventario/:codigo/disponibilidad', async (req, res) => {
+  try {
+    const { codigo } = req.params;
+    const cantidad = parseFloat(req.query.cantidad) || 100;
+    
+    const disponibilidad = await db.verificarDisponibilidadInventario(codigo, cantidad);
+    res.json(disponibilidad);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 🔄 Reiniciar inventario (útil para pruebas)
+app.post('/api/inventario/reiniciar', async (req, res) => {
+  try {
+    // Primero verificar si existen registros con bajo inventario
+    const verifyQuery = `
+      SELECT COUNT(*) as total FROM (
+        SELECT codigo, SUM(cantidad) as cantidad_total
+        FROM inventario 
+        GROUP BY codigo
+        HAVING cantidad_total < 100
+      ) as productos_bajo_stock
+    `;
+    
+    const verificacion = await db.ejecutarConsulta(verifyQuery);
+    
+    // Insertar más lotes para productos con bajo stock
+    const updateQuery = `
+      INSERT INTO inventario (alimento_codigo, cantidad, fecha_entrada, lote_id)
+      SELECT codigo, 1000, NOW(), CONCAT('RESTOCK-', codigo, '-', UNIX_TIMESTAMP()) 
+      FROM alimentos 
+      WHERE codigo IN (
+        SELECT codigo FROM (
+          SELECT codigo, SUM(cantidad) as cantidad_total
+          FROM inventario 
+          GROUP BY codigo
+          HAVING cantidad_total < 100
+        ) as productos_bajo_stock
+      )
+    `;
+    
+    const result = await db.ejecutarConsulta(updateQuery);
+    
+    res.json({
+      success: true,
+      mensaje: 'Inventario reiniciado exitosamente',
+      productosConBajoStock: verificacion[0].total,
+      nuevosLotesAgregados: result.affectedRows
+    });
+  } catch (error) {
+    console.error('❌ Error al reiniciar inventario:', error.message);
+    res.status(500).json({ 
+      success: false,
+      error: 'Error al reiniciar inventario',
+      detalles: error.message 
+    });
+  }
+});
+
+// 🎯 Confirmar plan y reducir inventario
+app.post('/api/planes/confirmar', async (req, res) => {
+  try {
+    const { planData } = req.body;
+    
+    if (!planData) {
+      return res.status(400).json({
+        success: false,
+        error: 'Datos del plan requeridos'
+      });
+    }
+    
+    const resultado = await generadorPlanes.confirmarPlanYReducirInventario(planData);
+    
+    res.json(resultado);
+    
+  } catch (error) {
+    console.error('❌ Error al confirmar plan:', error.message);
+    res.status(500).json({
+      success: false,
+      error: 'Error al confirmar plan',
+      detalles: error.message
+    });
   }
 });
 app.get('/api/preferencias', async (req, res) => {

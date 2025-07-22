@@ -512,6 +512,206 @@ class BaseDeDatos {
       connection.release();
     }
   }
+
+  // ===== MÉTODOS PARA INVENTARIO =====
+  
+  // Verificar disponibilidad de un alimento en inventario
+  async verificarDisponibilidadInventario(codigoAlimento, cantidadRequerida) {
+    let connection;
+    try {
+      connection = await this.pool.getConnection();
+      
+      const sql = `
+        SELECT SUM(cantidad_g) as cantidad_disponible
+        FROM inventario 
+        WHERE codigo_alimento = ? AND cantidad_g > 0
+      `;
+      
+      const [resultado] = await connection.execute(sql, [codigoAlimento]);
+      const cantidadDisponible = resultado[0].cantidad_disponible || 0;
+      
+      return {
+        disponible: cantidadDisponible >= cantidadRequerida,
+        cantidadDisponible: cantidadDisponible,
+        cantidadRequerida: cantidadRequerida
+      };
+    } catch (error) {
+      console.error('Error al verificar disponibilidad en inventario:', error.message);
+      throw error;
+    } finally {
+      if (connection) connection.release();
+    }
+  }
+
+  // Obtener alimentos disponibles en inventario con filtros
+  async obtenerAlimentosConInventario(preferencias = [], condiciones = [], limite = 10) {
+    // Asegurarnos de que sean números
+    preferencias = (preferencias || []).map(Number);
+    condiciones = (condiciones || []).map(Number);
+
+    const connection = await this.pool.getConnection();
+    try {
+      // 1) SQL base - solo alimentos que tienen inventario disponible
+      let sql = `
+        SELECT DISTINCT a.*, SUM(i.cantidad_g) as cantidad_disponible
+        FROM alimentos a
+        INNER JOIN inventario i ON a.codigo = i.codigo_alimento
+        WHERE a.energia_kcal > 0 AND i.cantidad_g > 0
+      `;
+      const params = [];
+
+      // 2) Filtrar preferencias
+      if (preferencias.length) {
+        sql += `
+        AND NOT EXISTS (
+          SELECT 1
+            FROM alimento_preferencia ap
+           WHERE ap.alimento_codigo = a.codigo
+             AND ap.preferencia_id IN (?))
+      `;
+        params.push(preferencias);
+      }
+
+      // 3) Filtrar condiciones
+      if (condiciones.length) {
+        sql += `
+        AND NOT EXISTS (
+          SELECT 1
+            FROM alimento_condicion ac
+           WHERE ac.alimento_codigo = a.codigo
+             AND ac.condicion_id IN (?))
+      `;
+        params.push(condiciones);
+      }
+
+      // 4) Agrupar y limitar resultados
+      sql += `
+        GROUP BY a.codigo
+        HAVING cantidad_disponible > 0
+        ORDER BY RAND() 
+        LIMIT ?
+      `;
+      params.push(limite);
+
+      // 5) Usamos query() para que expanda los arrays en IN (?)
+      const [alimentos] = await connection.query(sql, params);
+      return alimentos;
+
+    } catch (err) {
+      console.error('Error al obtener alimentos con inventario:', err.message);
+      throw err;
+    } finally {
+      connection.release();
+    }
+  }
+
+  // Reducir cantidad del inventario cuando se usa un alimento
+  async reducirInventario(codigoAlimento, cantidadUsada) {
+    let connection;
+    try {
+      connection = await this.pool.getConnection();
+      await connection.beginTransaction();
+
+      // Obtener registros de inventario ordenados por fecha (FIFO)
+      const sqlSelect = `
+        SELECT id, cantidad_g 
+        FROM inventario 
+        WHERE codigo_alimento = ? AND cantidad_g > 0
+        ORDER BY fecha_ingreso ASC, id ASC
+      `;
+      
+      const [registros] = await connection.execute(sqlSelect, [codigoAlimento]);
+      
+      if (registros.length === 0) {
+        throw new Error(`No hay inventario disponible para el alimento ${codigoAlimento}`);
+      }
+
+      let cantidadRestante = cantidadUsada;
+      const actualizaciones = [];
+
+      for (const registro of registros) {
+        if (cantidadRestante <= 0) break;
+
+        if (registro.cantidad_g >= cantidadRestante) {
+          // Este registro tiene suficiente cantidad
+          const nuevaCantidad = registro.cantidad_g - cantidadRestante;
+          actualizaciones.push({
+            id: registro.id,
+            nuevaCantidad: nuevaCantidad
+          });
+          cantidadRestante = 0;
+        } else {
+          // Este registro se agota completamente
+          actualizaciones.push({
+            id: registro.id,
+            nuevaCantidad: 0
+          });
+          cantidadRestante -= registro.cantidad_g;
+        }
+      }
+
+      if (cantidadRestante > 0) {
+        throw new Error(`Inventario insuficiente. Faltan ${cantidadRestante}g del alimento ${codigoAlimento}`);
+      }
+
+      // Aplicar las actualizaciones
+      for (const actualizacion of actualizaciones) {
+        const sqlUpdate = `
+          UPDATE inventario 
+          SET cantidad_g = ? 
+          WHERE id = ?
+        `;
+        await connection.execute(sqlUpdate, [actualizacion.nuevaCantidad, actualizacion.id]);
+      }
+
+      await connection.commit();
+      console.log(`✅ Inventario reducido: ${cantidadUsada}g del alimento ${codigoAlimento}`);
+      
+      return {
+        success: true,
+        cantidadReducida: cantidadUsada,
+        codigoAlimento: codigoAlimento
+      };
+
+    } catch (error) {
+      await connection.rollback();
+      console.error('Error al reducir inventario:', error.message);
+      throw error;
+    } finally {
+      if (connection) connection.release();
+    }
+  }
+
+  // Obtener resumen del inventario
+  async obtenerResumenInventario() {
+    let connection;
+    try {
+      connection = await this.pool.getConnection();
+      
+      const sql = `
+        SELECT 
+          a.codigo,
+          a.nombre,
+          SUM(i.cantidad_g) as cantidad_total,
+          COUNT(i.id) as num_lotes,
+          MIN(i.fecha_ingreso) as fecha_mas_antigua,
+          MAX(i.fecha_ingreso) as fecha_mas_reciente
+        FROM alimentos a
+        LEFT JOIN inventario i ON a.codigo = i.codigo_alimento AND i.cantidad_g > 0
+        GROUP BY a.codigo, a.nombre
+        HAVING cantidad_total > 0
+        ORDER BY cantidad_total DESC
+      `;
+      
+      const [resumen] = await connection.execute(sql);
+      return resumen;
+    } catch (error) {
+      console.error('Error al obtener resumen de inventario:', error.message);
+      throw error;
+    } finally {
+      if (connection) connection.release();
+    }
+  }
 }
 
 // Exportar la clase para usar en otros archivos

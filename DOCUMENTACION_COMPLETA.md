@@ -20,11 +20,12 @@
 
 ## 🎯 Descripción General
 
-Aplicación web completa que genera **planes nutricionales semanales personalizados** utilizando una base de datos de casi 1000 alimentos diferentes. El sistema calcula automáticamente las necesidades calóricas del usuario y crea planes balanceados con desayuno, almuerzo, cena y snacks distribuidos durante 7 días.
+Aplicación web completa que genera **planes nutricionales semanales personalizados** utilizando una base de datos de casi 1000 alimentos diferentes con **sistema de inventario en tiempo real**. El sistema calcula automáticamente las necesidades calóricas del usuario y crea planes balanceados con desayuno, almuerzo, cena y snacks distribuidos durante 7 días, verificando la disponibilidad de alimentos en inventario y gestionando automáticamente las existencias.
 
 ### Características Destacadas
 
 - ✅ **Generación Automática**: Planes nutricionales personalizados basados en datos del usuario
+- 📦 **Sistema de Inventario**: Validación de disponibilidad y reducción automática de existencias
 - 📅 **Planes Semanales**: Generación de 7 días completos con navegación diaria
 - 🍽️ **4 Comidas Diarias**: Desayuno, almuerzo, cena y snacks distribuidos apropiadamente
 - 📊 **Cálculo Científico**: Utiliza la fórmula Mifflin-St Jeor para cálculo de calorías
@@ -33,6 +34,7 @@ Aplicación web completa que genera **planes nutricionales semanales personaliza
 - 🌐 **Interfaz Moderna**: Frontend responsivo con Bootstrap 5
 - 🔄 **Sistema Simplificado**: Sin requisito de email, registro automático
 - 📈 **Sistema de Puntuación**: Análisis de cumplimiento nutricional (ej: 77%)
+- 🚨 **Control FIFO**: Sistema de inventario First In, First Out para alimentos
 
 ---
 
@@ -43,6 +45,15 @@ Aplicación web completa que genera **planes nutricionales semanales personaliza
 - **Navegación por días** con botones Lunes-Domingo
 - **Puntuación semanal** de cumplimiento nutricional
 - **Variedad automática** de alimentos durante la semana
+- **Validación de inventario** en tiempo real
+- **Reducción automática** de existencias
+
+### Sistema de Inventario Inteligente
+- ✅ **Validación previa**: Verifica disponibilidad antes de asignar alimentos
+- 🔄 **Reducción automática**: Actualiza existencias al generar planes
+- 📦 **Control FIFO**: Sistema First In, First Out para fechas de caducidad
+- 🚨 **Alertas de stock**: Notifica cuando hay inventario insuficiente
+- 📊 **Reportes**: Resumen de inventario disponible por alimento
 
 ### Análisis Nutricional Completo
 - ✅ **Macronutrientes**: Energía, proteínas, grasas totales, carbohidratos, fibra
@@ -64,9 +75,9 @@ Aplicación web completa que genera **planes nutricionales semanales personaliza
 ```
 Comida_Saludable_app/
 ├── Backend/
-│   ├── Base_de_datos.js      # Clase para manejo de BD con pool connections
-│   ├── GeneradorPlanes.js    # Algoritmo de generación semanal
-│   ├── server.js             # Servidor Express API
+│   ├── Base_de_datos.js      # Clase para manejo de BD con pool connections + inventario
+│   ├── GeneradorPlanes.js    # Algoritmo de generación semanal con validación de inventario
+│   ├── server.js             # Servidor Express API con endpoints de inventario
 │   ├── actualizar_db.js      # Script de migración BD
 │   └── package.json          # Dependencias del backend
 ├── frontend/
@@ -211,6 +222,21 @@ Relación entre planes y alimentos (7 días por plan)
 - tipo_comida (VARCHAR) - desayuno/almuerzo/cena/snacks
 ```
 
+### Tabla: `inventario` ⭐ NUEVA
+Control de existencias de alimentos disponibles
+```sql
+- id (INT, PK, AUTO_INCREMENT)
+- codigo_alimento (INT, FK) - Referencia a tabla alimentos
+- cantidad_g (DECIMAL(8,2)) - Cantidad disponible en gramos
+- fecha_ingreso (DATE) - Fecha de ingreso al inventario
+```
+
+**Características del sistema de inventario:**
+- 🔍 **Validación previa**: Verifica disponibilidad antes de asignar
+- 🔄 **Reducción automática**: Actualiza existencias al confirmar plan
+- 📅 **Control FIFO**: Usa alimentos más antiguos primero
+- ⚠️ **Alertas**: Notifica cuando no hay suficiente stock
+
 ---
 
 ## 🔧 API Reference Detallada
@@ -234,7 +260,58 @@ Obtiene información sobre la base de datos y estado del sistema.
 ```json
 {
   "totalAlimentos": 987,
+  "totalAlimentosConInventario": 47,
   "mensaje": "Base de datos conectada correctamente"
+}
+```
+
+### Gestión de Inventario ⭐ NUEVO
+
+#### GET `/api/inventario`
+Obtiene resumen completo del inventario disponible.
+
+**Respuesta:**
+```json
+[
+  {
+    "codigo": 188,
+    "nombre": "Borojó, fresco",
+    "cantidad_total": 650.00,
+    "num_lotes": 3,
+    "fecha_mas_antigua": "2025-07-15",
+    "fecha_mas_reciente": "2025-07-20"
+  },
+  {
+    "codigo": 289,
+    "nombre": "Uvilla fresca", 
+    "cantidad_total": 350.00,
+    "num_lotes": 2,
+    "fecha_mas_antigua": "2025-07-18",
+    "fecha_mas_reciente": "2025-07-21"
+  }
+]
+```
+
+#### GET `/api/inventario/:codigo/disponibilidad`
+Verifica la disponibilidad de un alimento específico en inventario.
+
+**Parámetros de URL:**
+- `codigo` (number, required) - Código del alimento
+
+**Query Parameters:**
+- `cantidad` (number, optional) - Cantidad requerida en gramos. Default: 100
+
+**Ejemplo:**
+```
+GET /api/inventario/188/disponibilidad?cantidad=150
+```
+
+**Respuesta:**
+```json
+{
+  "disponible": true,
+  "cantidadDisponible": 650.00,
+  "cantidadRequerida": 150
 }
 ```
 
@@ -379,22 +456,51 @@ Factores de actividad:
 - **Cena**: 30% de calorías totales
 - **Snacks**: 10% de calorías totales
 
-### 3. Generación Semanal
+### 3. Generación Semanal con Inventario ⭐ ACTUALIZADO
 ```javascript
-// Lógica de generación semanal
+// Algoritmo mejorado con validación de inventario
 for (let dia = 1; dia <= 7; dia++) {
   const planDia = {
     fecha: calcularFecha(dia),
-    desayuno: generarComida('desayuno', caloriasDiarias * 0.25),
-    almuerzo: generarComida('almuerzo', caloriasDiarias * 0.35),
-    cena: generarComida('cena', caloriasDiarias * 0.30),
-    snacks: generarComida('snacks', caloriasDiarias * 0.10)
+    desayuno: await generarComidaConInventario('desayuno', caloriasDiarias * 0.25),
+    almuerzo: await generarComidaConInventario('almuerzo', caloriasDiarias * 0.35),
+    cena: await generarComidaConInventario('cena', caloriasDiarias * 0.30),
+    snacks: await generarComidaConInventario('snacks', caloriasDiarias * 0.10)
   };
+  
+  // Validar y reservar inventario antes de confirmar
+  await validarYReservarInventario(planDia);
   
   // Evitar repeticiones entre días
   verificarVariedad(planDia, diasAnteriores);
 }
+
+async function generarComidaConInventario(tipo, calorias) {
+  // 1. Obtener alimentos con inventario disponible
+  const candidatos = await obtenerAlimentosConInventario();
+  
+  // 2. Validar disponibilidad para cantidad requerida
+  for (const alimento of candidatos) {
+    const cantidad = calcularCantidadOptima(alimento, calorias);
+    const disponible = await verificarInventario(alimento.codigo, cantidad);
+    
+    if (disponible) {
+      // 3. Reducir inventario automáticamente (FIFO)
+      await reducirInventario(alimento.codigo, cantidad);
+      return { alimento, cantidad };
+    }
+  }
+  
+  throw new Error(`Sin inventario suficiente para ${tipo}`);
+}
 ```
+
+**Flujo del Sistema de Inventario:**
+1. 🔍 **Consulta**: Solo considera alimentos con inventario > 0
+2. ✅ **Validación**: Verifica que hay suficiente cantidad disponible
+3. 📦 **Reserva**: Aplica sistema FIFO (First In, First Out)
+4. 🔄 **Reducción**: Actualiza inventario automáticamente
+5. ⚠️ **Fallback**: Si no hay inventario, busca alternativas
 
 ### 4. Sistema de Puntuación Semanal
 - **Cumplimiento calórico** (30 puntos)
@@ -404,6 +510,13 @@ for (let dia = 1; dia <= 7; dia++) {
 - **Distribución de comidas** (10 puntos)
 
 **Total: 100 puntos** (ejemplo: 77% = 77 puntos)
+
+### 5. Gestión de Inventario ⭐ NUEVO
+- **Control de existencias** en tiempo real
+- **Sistema FIFO** para fechas de vencimiento
+- **Validación previa** antes de asignar alimentos
+- **Reducción automática** al confirmar planes
+- **Reportes de disponibilidad** por alimento
 
 ---
 
@@ -592,7 +705,51 @@ Tipos:
 
 ## 📋 Changelog
 
-### [1.2.0] - 2025-07-19 (Actual)
+### [1.3.0] - 2025-07-21 (Actual) ⭐ NUEVO
+
+#### ✨ Agregado
+- **Sistema completo de inventario**
+  - Tabla `inventario` con control de existencias en gramos
+  - Validación de disponibilidad antes de asignar alimentos
+  - Reducción automática de inventario al generar planes
+  - Sistema FIFO (First In, First Out) para gestión de fechas
+  
+- **Nuevos endpoints de API**
+  - `GET /api/inventario` - Resumen completo del inventario
+  - `GET /api/inventario/:codigo/disponibilidad` - Verificar disponibilidad específica
+  - Actualizado `GET /api/info` para incluir conteo de alimentos con inventario
+
+- **Algoritmo mejorado de generación**
+  - Solo usa alimentos con inventario disponible
+  - Validación previa antes de asignar cantidades
+  - Manejo de errores cuando no hay suficiente stock
+  - Mensajes informativos sobre disponibilidad
+
+#### 🔧 Mejorado
+- **Base de datos** con métodos para gestión de inventario
+  - `verificarDisponibilidadInventario()`
+  - `obtenerAlimentosConInventario()`
+  - `reducirInventario()` con transacciones
+  - `obtenerResumenInventario()`
+  
+- **GeneradorPlanes** adaptado para trabajar con inventario
+  - Validación en tiempo real de existencias
+  - Logs detallados de disponibilidad
+  - Fallback cuando no hay suficiente inventario
+
+#### 🚨 Características de Seguridad
+- **Transacciones de base de datos** para operaciones de inventario
+- **Rollback automático** en caso de errores
+- **Validación doble** antes de reducir existencias
+- **Logs detallados** para auditoría de movimientos
+
+#### 💡 Casos de Uso del Inventario
+1. **Banco de Alimentos**: Control de donaciones y distribución
+2. **Restaurantes**: Gestión de ingredientes disponibles
+3. **Instituciones**: Control de almacén de alimentos
+4. **Cocinas comunitarias**: Planificación basada en existencias
+
+### [1.2.0] - 2025-07-19
 
 #### ✨ Agregado
 - **Sistema de planes semanales** completo
@@ -644,6 +801,23 @@ Tipos:
 
 ### Problemas Comunes
 
+#### Error: "Sin inventario disponible para generar [comida]"
+```bash
+# No hay alimentos con inventario suficiente
+# Solución: Verificar inventario disponible
+curl http://localhost:3000/api/inventario
+
+# Verificar alimento específico
+curl http://localhost:3000/api/inventario/188/disponibilidad?cantidad=100
+```
+
+#### Error: "Inventario insuficiente. Faltan Xg del alimento Y"
+```bash
+# La cantidad requerida excede el inventario disponible
+# Solución: Revisar existencias o reducir porción
+GET /api/inventario/:codigo/disponibilidad
+```
+
 #### Error: "too many connections"
 ```bash
 # Problema con pool de conexiones MySQL
@@ -694,23 +868,35 @@ DEBUG=app:* npm start
 2. **Verificar variables**: Revisar archivo `.env`
 3. **Verificar conexión**: Probar endpoint `/api/test`
 4. **Verificar base de datos**: Probar endpoint `/api/info`
+5. **Verificar inventario**: Probar endpoint `/api/inventario` ⭐ NUEVO
+6. **Verificar disponibilidad**: Probar `/api/inventario/:codigo/disponibilidad` ⭐ NUEVO
 
 ---
 
 ## 🎯 Casos de Uso
 
-### Caso 1: Usuario Nuevo (Simplificado)
+### Caso 1: Usuario Nuevo con Inventario (Actualizado) ⭐
 1. Usuario llena formulario **sin email** (solo datos personales)
 2. Sistema genera email automático con timestamp
 3. Calcula calorías necesarias y crea usuario
-4. Genera plan nutricional semanal personalizado
-5. Muestra plan con navegación por días y puntuación
+4. **Valida inventario disponible** antes de generar plan
+5. Genera plan nutricional semanal personalizado **solo con alimentos en stock**
+6. **Reduce automáticamente** las cantidades del inventario
+7. Muestra plan con navegación por días y puntuación
 
-### Caso 2: Regeneración de Plan Semanal
+### Caso 2: Regeneración con Inventario Limitado ⭐ NUEVO
 1. Usuario solicita nuevo plan semanal
-2. Sistema mantiene datos del usuario existente
-3. Genera nueva combinación de 7 días de alimentos
-4. Presenta plan alternativo con diferente puntuación
+2. Sistema verifica inventario actualizado (menor disponibilidad)
+3. Genera plan alternativo con alimentos disponibles
+4. Notifica si algunos alimentos no están disponibles
+5. Presenta plan adaptado a existencias actuales
+
+### Caso 3: Gestión de Banco de Alimentos ⭐ NUEVO
+1. **Administrador** revisa inventario disponible
+2. Ve resumen de 47 alimentos con existencias
+3. Genera planes múltiples hasta agotar stock
+4. Sistema alerta cuando inventario es insuficiente
+5. Puede consultar disponibilidad específica por alimento
 
 ### Caso 3: Navegación Diaria
 1. Usuario ve resumen semanal con puntuación
@@ -721,6 +907,13 @@ DEBUG=app:* npm start
 ---
 
 ## 📈 Funcionalidades Avanzadas
+
+### Sistema de Inventario en Tiempo Real ⭐ NUEVO
+- **Control de existencias** por alimento en gramos
+- **Validación previa** antes de asignar a planes
+- **Reducción automática** al confirmar generación
+- **Sistema FIFO** para fechas de ingreso/vencimiento
+- **Reportes detallados** de disponibilidad
 
 ### Sistema de Puntuación Semanal
 - **Análisis completo** de 7 días de alimentación
@@ -744,18 +937,25 @@ DEBUG=app:* npm start
 
 ## 🔮 Roadmap Futuro
 
-### [1.3.0] - Planificado para Q3 2025
+### [1.4.0] - Planificado para Q3 2025
+- [ ] **Sistema de inventario avanzado**
+  - [ ] Alertas automáticas de stock bajo
+  - [ ] Fechas de vencimiento y rotación automática
+  - [ ] Integración con códigos de barras
+  - [ ] Reportes de consumo y tendencias
 - [ ] Sistema de autenticación de usuarios
 - [ ] Historial de planes semanales generados
 - [ ] Exportación de planes a PDF
 - [ ] Filtros por alergias alimentarias
-- [ ] Planes mensuales (4 semanas)
 
-### [1.4.0] - Planificado para Q4 2025
+### [1.5.0] - Planificado para Q4 2025
+- [ ] **Gestión multi-almacén**
+  - [ ] Inventarios por ubicación/sede
+  - [ ] Transferencias entre almacenes
+  - [ ] Control de proveedores y donaciones
 - [ ] Seguimiento de progreso nutricional
 - [ ] Integración con APIs de supermercados
 - [ ] Sistema de favoritos y calificaciones
-- [ ] Análisis de tendencias nutricionales
 
 ### [2.0.0] - Planificado para 2026
 - [ ] Aplicación móvil nativa
@@ -788,11 +988,27 @@ echo "MYSQLUSER=root" >> .env
 npm install
 npm start
 
-# 3. Abrir navegador
+# 3. Verificar inventario disponible ⭐ NUEVO
+curl http://localhost:3000/api/inventario
+
+# 4. Abrir navegador
 # http://localhost:3000
 ```
 
-¡Tu aplicación de **planes nutricionales semanales** está lista para usar! 🎉
+¡Tu aplicación de **planes nutricionales semanales con sistema de inventario** está lista para usar! 🎉
+
+### Ejemplos de Uso del Inventario ⭐ NUEVO
+
+```bash
+# Ver todos los alimentos con inventario
+curl http://localhost:3000/api/inventario
+
+# Verificar disponibilidad específica
+curl "http://localhost:3000/api/inventario/188/disponibilidad?cantidad=150"
+
+# Ver información del sistema incluyendo inventario
+curl http://localhost:3000/api/info
+```
 
 ---
 
@@ -802,5 +1018,5 @@ Este proyecto está bajo la Licencia MIT - ver archivo LICENSE para detalles.
 
 ---
 
-*Documentación generada el 19 de julio de 2025*
-*Aplicación de Planes Nutricionales Semanales v1.2.0*
+*Documentación actualizada el 21 de julio de 2025*
+*Aplicación de Planes Nutricionales Semanales con Sistema de Inventario v1.3.0*

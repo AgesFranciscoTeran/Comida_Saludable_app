@@ -53,6 +53,40 @@ document.getElementById('form').addEventListener('submit', async e => {
     }
 });
 
+/**
+ * Función global para cambiar de día (llamada desde HTML onclick)
+ */
+function cambiarDia(dia) {
+    console.log('🖱️ cambiarDia llamada para:', dia);
+    
+    if (!currentPlan || !currentPlan.planSemanal || !currentPlan.planSemanal[dia]) {
+        console.error('❌ No se encontró información para el día:', dia);
+        return;
+    }
+    
+    // Remover active de todas las pestañas
+    const diasTab = document.getElementById('dias-tab');
+    diasTab.querySelectorAll('.nav-link').forEach(link => {
+        link.classList.remove('active');
+    });
+    
+    // Activar pestaña actual
+    const currentTab = diasTab.querySelector(`[data-dia="${dia}"]`);
+    if (currentTab) {
+        currentTab.classList.add('active');
+    }
+    
+    // Mostrar contenido del día
+    mostrarDia(currentPlan.planSemanal[dia], dia);
+}
+
+// Hacer la función accesible globalmente
+window.cambiarDia = cambiarDia;
+
+// Test de verificación
+console.log('🧪 Función cambiarDia disponible:', typeof window.cambiarDia);
+console.log('🧪 Función cambiarDia en scope global:', typeof cambiarDia);
+
 /* =========================================================
    SECCIÓN UI – PLAN SEMANAL Y PLAN DIARIO
    ========================================================= */
@@ -70,6 +104,9 @@ document.getElementById('form').addEventListener('submit', async e => {
  */
 function mostrarPlanSemanal(plan) {
     console.log('🔍 plan recibido en mostrarPlanSemanal:', plan);
+    
+    // Guardar plan actual para confirmación
+    currentPlan = plan;
 
     const dias = Object.keys(plan.planSemanal || {});
     if (!dias.length) {
@@ -121,44 +158,97 @@ function mostrarPlanSemanal(plan) {
 
     contentDiv.innerHTML = html;
 
-    // 2) Crear pestañas
+    // 2) Crear pestañas usando HTML directo
     const diasTab = document.getElementById('dias-tab');
-    Object.keys(plan.planSemanal).forEach((dia,i) => {
-        const li = document.createElement('li');
-        li.className = 'nav-item';
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = `nav-link ${i===0?'active':''}`;
-        btn.textContent = dia;
-        btn.onclick = () => {
-            diasTab.querySelectorAll('.nav-link').forEach(x=>x.classList.remove('active'));
-            btn.classList.add('active');
-            mostrarDia(plan.planSemanal[dia], dia);
-        };
-        li.appendChild(btn);
-        diasTab.appendChild(li);
+    diasTab.innerHTML = ''; // Limpiar pestañas previas
+    console.log('🔗 Creando pestañas para días:', Object.keys(plan.planSemanal));
+    
+    // Crear HTML de pestañas directamente
+    let tabsHTML = '';
+    Object.keys(plan.planSemanal).forEach((dia, i) => {
+        const isActive = i === 0 ? 'active' : '';
+        tabsHTML += `
+            <li class="nav-item">
+                <button class="nav-link ${isActive}" 
+                        type="button" 
+                        onclick="cambiarDia('${dia}')"
+                        data-dia="${dia}">
+                    ${dia}
+                </button>
+            </li>
+        `;
+    });
+    
+    console.log('📝 HTML de pestañas generado:', tabsHTML);
+    diasTab.innerHTML = tabsHTML;
+    console.log('🔍 Pestañas insertadas, elemento diasTab:', diasTab);
+    
+    // Agregar event delegation como respaldo
+    diasTab.addEventListener('click', function(e) {
+        if (e.target.classList.contains('nav-link')) {
+            const dia = e.target.getAttribute('data-dia');
+            console.log('🖱️ Clic delegado detectado para día:', dia);
+            
+            // Remover active de todas las pestañas
+            diasTab.querySelectorAll('.nav-link').forEach(link => {
+                link.classList.remove('active');
+            });
+            
+            // Activar pestaña clickeada
+            e.target.classList.add('active');
+            
+            // Mostrar contenido del día
+            if (currentPlan && currentPlan.planSemanal && currentPlan.planSemanal[dia]) {
+                mostrarDia(currentPlan.planSemanal[dia], dia);
+            }
+        }
     });
 
     // 3) Mostrar primer día
     mostrarDia(plan.planSemanal[ Object.keys(plan.planSemanal)[0] ],
         Object.keys(plan.planSemanal)[0]);
+    
+    // 4) Agregar botón para confirmar plan
+    agregarBotonConfirmarPlan(plan);
 }
 
 /**
  * Muestra el detalle de un día concreto (desayuno, almuerzo, snacks, cena)
  */
 function mostrarDia(detalles={}, diaNombre='') {
+    console.log('mostrarDia llamada con:', diaNombre, detalles);
     const diaContent = document.getElementById('dia-content');
     const resumen    = detalles.resumenNutricional || {};
     const cumple     = detalles.cumplimiento     || {};
     const comidas    = detalles.comidas          || {};
+    const advertenciasInventario = detalles.advertenciasInventario || [];
 
     let html = `
     <div class="day-plan fade-in">
       <h4>
         <i class="fas fa-calendar-day"></i> ${diaNombre}
         <span class="badge bg-primary ms-2">${resumen.calorias ?? 0} kcal</span>
+        ${advertenciasInventario.length > 0 ? 
+          `<span class="badge bg-warning ms-2">
+            <i class="fas fa-exclamation-triangle"></i> 
+            ${advertenciasInventario.length} con inventario bajo
+          </span>` 
+          : ''}
       </h4>
+      
+      ${advertenciasInventario.length > 0 ? `
+        <div class="alert alert-warning alert-dismissible fade show" role="alert">
+          <i class="fas fa-exclamation-triangle me-2"></i>
+          <strong>Advertencia de Inventario:</strong> Algunos alimentos tienen stock insuficiente.
+          <br><small>
+            ${advertenciasInventario.map(adv => 
+              `${adv.alimento}: necesita ${adv.cantidadNecesaria}g, disponible ${adv.cantidadDisponible}g`
+            ).join(' • ')}
+          </small>
+          <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+      ` : ''}
+      
       <div class="row gy-4">
   `;
 
@@ -166,24 +256,46 @@ function mostrarDia(detalles={}, diaNombre='') {
         const det = comidas[tipo] || {};
         const nut = det.nutrientesReales || {};
         const als = Array.isArray(det.alimentos) ? det.alimentos : [];
+        const advertenciasTipo = (det.advertenciasInventario || []);
 
         html += `
       <div class="col-lg-6">
         <div class="card meal-card">
           <div class="card-header meal-header-${tipo}">
-            <h5>${obtenerIconoComida(tipo)} ${tipo.charAt(0).toUpperCase()+tipo.slice(1)}</h5>
+            <h5>
+              ${obtenerIconoComida(tipo)} ${tipo.charAt(0).toUpperCase()+tipo.slice(1)}
+              ${advertenciasTipo.length > 0 ? 
+                `<span class="badge bg-warning ms-2">
+                  <i class="fas fa-exclamation-triangle"></i> 
+                  ${advertenciasTipo.length}
+                </span>` 
+                : ''}
+            </h5>
             <div class="meal-stats">
               <span class="badge bg-light text-dark">${nut.calorias   ?? 0} kcal</span>
               <span class="badge bg-info">${nut.proteinas  ?? 0}g prot</span>
             </div>
           </div>
           <div class="card-body">
-            ${als.map(al => `
-              <div class="alimento-item mb-2">
+            ${als.map(al => {
+              const tieneAdvertencia = al.inventario && al.inventario.advertencia;
+              return `
+              <div class="alimento-item mb-2 ${tieneAdvertencia ? 'border border-warning' : ''}">
                 <div class="d-flex justify-content-between">
                   <div>
                     <strong>${al.nombre}</strong>
+                    ${tieneAdvertencia ? 
+                      `<span class="badge bg-warning ms-1">
+                        <i class="fas fa-exclamation-triangle"></i> Stock bajo
+                      </span>` 
+                      : ''}
                     <small class="text-muted d-block">${al.cantidad}g</small>
+                    ${tieneAdvertencia ? 
+                      `<small class="text-warning">
+                        Disponible: ${al.inventario.cantidadDisponible}g 
+                        / Necesario: ${al.inventario.cantidadRequerida}g
+                      </small>` 
+                      : ''}
                   </div>
                   <div>
                     <span class="badge bg-primary">${al.nutrientes.calorias ?? 0} kcal</span>
@@ -194,15 +306,142 @@ function mostrarDia(detalles={}, diaNombre='') {
                   </div>
                 </div>
               </div>
-            `).join('')}
+            `;}).join('')}
           </div>
         </div>
       </div>
-    `;
+        `;
     });
 
     html += `</div></div>`;
     diaContent.innerHTML = html;
+}
+
+// 🎯 Función para agregar botón de confirmar plan
+function agregarBotonConfirmarPlan(plan) {
+    const contentDiv = document.getElementById('plan-content');
+    
+    // Verificar si hay alimentos con inventario insuficiente
+    let totalAdvertencias = 0;
+    let alimentosDisponibles = 0;
+    
+    if (plan.planSemanal) {
+        Object.values(plan.planSemanal).forEach(dia => {
+            if (dia.advertenciasInventario) {
+                totalAdvertencias += dia.advertenciasInventario.length;
+            }
+            Object.values(dia.comidas || {}).forEach(comida => {
+                (comida.alimentos || []).forEach(alimento => {
+                    if (alimento.inventario && alimento.inventario.listo_para_procesar) {
+                        alimentosDisponibles++;
+                    }
+                });
+            });
+        });
+    }
+    
+    const botonHtml = `
+        <div class="mt-4 text-center">
+            <div class="card border-success">
+                <div class="card-body">
+                    <h5 class="card-title">
+                        <i class="fas fa-clipboard-check"></i> Confirmación del Plan
+                    </h5>
+                    <p class="card-text">
+                        ${totalAdvertencias > 0 ? 
+                            `<span class="text-warning">
+                                <i class="fas fa-exclamation-triangle"></i> 
+                                ${totalAdvertencias} alimento(s) tienen inventario insuficiente.
+                            </span><br>` 
+                            : ''
+                        }
+                        <span class="text-success">
+                            <i class="fas fa-check-circle"></i> 
+                            ${alimentosDisponibles} alimento(s) están listos para ser procesados.
+                        </span>
+                    </p>
+                    <button class="btn btn-success btn-lg" onclick="confirmarPlan()" id="btn-confirmar-plan">
+                        <i class="fas fa-handshake"></i> Aceptar Plan y Reducir Inventario
+                    </button>
+                    <br>
+                    <small class="text-muted mt-2 d-block">
+                        Al aceptar el plan, se reducirá el inventario de los alimentos disponibles.
+                    </small>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    contentDiv.innerHTML += botonHtml;
+}
+
+// 🎯 Variable global para almacenar el plan actual
+let currentPlan = null;
+
+// 🎯 Función para confirmar plan y reducir inventario
+async function confirmarPlan() {
+    if (!currentPlan) {
+        mostrarAlerta('error', 'No hay plan para confirmar');
+        return;
+    }
+    
+    const btn = document.getElementById('btn-confirmar-plan');
+    const originalText = btn.innerHTML;
+    
+    try {
+        // Cambiar estado del botón
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Procesando...';
+        
+        const response = await fetch(`${API_BASE}/planes/confirmar`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ planData: currentPlan })
+        });
+        
+        const resultado = await response.json();
+        
+        if (resultado.success) {
+            mostrarAlerta('success', resultado.mensaje);
+            
+            // Actualizar botón para mostrar éxito
+            btn.innerHTML = '<i class="fas fa-check-circle"></i> Plan Confirmado';
+            btn.className = 'btn btn-outline-success btn-lg';
+            
+            // Mostrar detalles del resultado
+            mostrarResultadoConfirmacion(resultado);
+            
+        } else {
+            throw new Error(resultado.error || 'Error al confirmar plan');
+        }
+        
+    } catch (error) {
+        console.error('❌ Error al confirmar plan:', error);
+        mostrarAlerta('error', `Error al confirmar plan: ${error.message}`);
+        
+        // Restaurar botón
+        btn.disabled = false;
+        btn.innerHTML = originalText;
+    }
+}
+
+// 🎯 Función para mostrar resultado de confirmación
+function mostrarResultadoConfirmacion(resultado) {
+    const contentDiv = document.getElementById('plan-content');
+    
+    const resultadoHtml = `
+        <div class="mt-3 alert alert-success">
+            <h6><i class="fas fa-check-circle"></i> Confirmación Exitosa</h6>
+            <p><strong>Productos procesados:</strong> ${resultado.resumen.totalProcesados}</p>
+            ${resultado.resumen.totalErrores > 0 ? 
+                `<p class="text-warning"><strong>Errores:</strong> ${resultado.resumen.totalErrores}</p>` 
+                : ''
+            }
+            <small>Fecha: ${new Date(resultado.resumen.fechaConfirmacion).toLocaleString()}</small>
+        </div>
+    `;
+    
+    contentDiv.innerHTML += resultadoHtml;
 }
 
 /**
@@ -213,11 +452,17 @@ function mostrarPlan(plan) {
         mostrarAlerta('warning','Plan diario no disponible');
         return;
     }
+    
+    // Guardar plan actual para confirmación
+    currentPlan = plan;
+    
     if (plan.planSemanal) {
         mostrarPlanSemanal(plan);
     } else {
         // Reutilizamos la vista de un solo día:
         mostrarDia(plan, 'Hoy');
+        // Para planes individuales, también agregamos el botón
+        agregarBotonConfirmarPlan(plan);
     }
 }
 /* =========================================================
