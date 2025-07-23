@@ -283,20 +283,20 @@ class GeneradorPlanes {
     const seleccion  = [];
     const acumulados = { calorias:0, proteinas:0, grasas:0, carbohidratos:0, fibra:0, micronutrientes: Object.fromEntries(Object.keys(targets.micronutrientes||{}).map(m=>[m,0])) };
     const advertenciasInventario = [];
-    const alimentosUsadosEnEstaComida = new Set(); // ✅ Nuevo: Solo para esta comida
+    const alimentosUsadosEnEstaComida = new Set(); //  Nuevo: Solo para esta comida
 
     for (let i = 0; i < candidatos.length && acumulados.calorias < (targets.calorias - tolerancia) && seleccion.length < 5; i++) {
       const cand = candidatos[i];
-      // ✅ Cambio: Solo evitar repetir en la misma comida
+      //  Cambio: Solo evitar repetir en la misma comida
       if (alimentosUsadosEnEstaComida.has(cand.codigo)) continue;
 
       // Calcular cantidad ideal sin pasarse
       const cantidad = this.calcularCantidadOptima(cand, targets, acumulados);
       
-      // ✅ VERIFICAR INVENTARIO pero no bloquear la generación
+      //  VERIFICAR INVENTARIO pero no bloquear la generación
       const disponibilidad = await this.db.verificarDisponibilidadInventario(cand.codigo, cantidad);
       
-      // ✅ Marcar como usado solo en esta comida
+      //  Marcar como usado solo en esta comida
       alimentosUsadosEnEstaComida.add(cand.codigo);
       const alimTot = this.calcularNutrientesTotales(cand, cantidad);
 
@@ -309,9 +309,9 @@ class GeneradorPlanes {
       };
 
       if (disponibilidad.disponible) {
-        console.log(`✅ Inventario suficiente para ${cand.nombre}: ${cantidad}g (disponible: ${disponibilidad.cantidadDisponible}g)`);
+        console.log(` Inventario suficiente para ${cand.nombre}: ${cantidad}g (disponible: ${disponibilidad.cantidadDisponible}g)`);
         
-        // ✅ NO REDUCIR INVENTARIO AQUÍ - Solo marcar como disponible
+        //  NO REDUCIR INVENTARIO AQUÍ - Solo marcar como disponible
         alimTot.inventario.procesado = false; // Cambiado: no procesado hasta confirmación
         alimTot.inventario.listo_para_procesar = true;
         
@@ -321,7 +321,7 @@ class GeneradorPlanes {
         }
         
       } else {
-        console.warn(`⚠️ Inventario insuficiente para ${cand.nombre}: necesita ${cantidad}g, disponible ${disponibilidad.cantidadDisponible}g`);
+        console.warn(` Inventario insuficiente para ${cand.nombre}: necesita ${cantidad}g, disponible ${disponibilidad.cantidadDisponible}g`);
         
         // Agregar a lista de advertencias pero incluir el alimento en el plan
         advertenciasInventario.push({
@@ -344,7 +344,7 @@ class GeneradorPlanes {
       this.acumularNutrientes(acumulados, alimTot);
     }
 
-    console.log(`🎯 ${tipoComida} generada con ${seleccion.length} alimentos (${advertenciasInventario.length} con advertencias de inventario)`);
+    console.log(` ${tipoComida} generada con ${seleccion.length} alimentos (${advertenciasInventario.length} con advertencias de inventario)`);
     
     return {
       tipo: tipoComida,
@@ -416,9 +416,9 @@ class GeneradorPlanes {
     try {
       const planIdGuardado = await this.db.guardarPlan(usuario, plan);
       plan.id = planIdGuardado;
-      console.log(`✅ Plan guardado con ID: ${planIdGuardado}`);
+      console.log(` Plan guardado con ID: ${planIdGuardado}`);
     } catch (error) {
-      console.warn('⚠️ No se pudo guardar el plan en BD:', error.message);
+      console.warn(' No se pudo guardar el plan en BD:', error.message);
       // Continuar sin guardar si hay error
     }
 
@@ -429,7 +429,7 @@ class GeneradorPlanes {
   async generarComidaBalanceadaSimple(tipoComida, targets, opciones = {}) {
     const { preferencias = [], condiciones = [], diaIndice = 0 } = opciones;
     
-    console.log(`🍽️ Generando ${tipoComida} con objetivo: ${targets.calorias} kcal`);
+    console.log(` Generando ${tipoComida} con objetivo: ${targets.calorias} kcal`);
     
     // Obtener alimentos disponibles
     const alimentosDisponibles = await this.db.obtenerAlimentosBalanceados();
@@ -494,10 +494,10 @@ class GeneradorPlanes {
       seleccion.push(nutrientesAlimento);
       this.acumularNutrientes(acumulados, nutrientesAlimento.nutrientes);
       
-      console.log(`  ✅ ${alimento.nombre}: ${cantidadOptima.toFixed(1)}g = ${nutrientesAlimento.nutrientes.calorias} kcal`);
+      console.log(`  ${alimento.nombre}: ${cantidadOptima.toFixed(1)}g = ${nutrientesAlimento.nutrientes.calorias} kcal`);
     }
     
-    console.log(`🎯 ${tipoComida} completado: ${acumulados.calorias} kcal (objetivo: ${targets.calorias})`);
+    console.log(` ${tipoComida} completado: ${acumulados.calorias} kcal (objetivo: ${targets.calorias})`);
     
     return {
       tipo: tipoComida,
@@ -595,23 +595,23 @@ class GeneradorPlanes {
     return resumen;
   }
 
-  // 🎯 Método para confirmar plan y reducir inventario
+  //  Método para confirmar plan y reducir inventario
   async confirmarPlanYReducirInventario(planData) {
     const errores = [];
     const exitos = [];
     
     try {
-      console.log('🎯 Iniciando confirmación de plan y reducción de inventario...');
-      console.log('📊 Estructura del plan recibido:', Object.keys(planData));
+      console.log(' Iniciando confirmación de plan y reducción de inventario...');
+      console.log(' Estructura del plan recibido:', Object.keys(planData));
       
       // El plan viene como planData.planSemanal, no planData.dias
       const planSemanal = planData.planSemanal || {};
       const dias = Object.keys(planSemanal);
       
-      console.log('📅 Días encontrados en el plan:', dias);
+      console.log(' Días encontrados en el plan:', dias);
       
       if (dias.length === 0) {
-        console.warn('⚠️ No se encontraron días en el plan');
+        console.warn(' No se encontraron días en el plan');
         return {
           success: true,
           mensaje: 'No hay alimentos para procesar en este plan',
@@ -628,17 +628,17 @@ class GeneradorPlanes {
       // Procesar cada día del plan
       for (const nombreDia of dias) {
         const diaData = planSemanal[nombreDia];
-        console.log(`📅 Procesando día ${nombreDia}:`, Object.keys(diaData.comidas || {}));
+        console.log(` Procesando día ${nombreDia}:`, Object.keys(diaData.comidas || {}));
         
         // Procesar cada comida del día
         for (const [tipoComida, comida] of Object.entries(diaData.comidas || {})) {
-          console.log(`🍽️ Procesando ${tipoComida} del ${nombreDia}`);
-          console.log(`🥘 Alimentos en ${tipoComida}:`, comida.alimentos?.length || 0);
+          console.log(` Procesando ${tipoComida} del ${nombreDia}`);
+          console.log(`Alimentos en ${tipoComida}:`, comida.alimentos?.length || 0);
           
           // Procesar cada alimento de la comida
           for (const alimento of comida.alimentos || []) {
             try {
-              console.log(`🔍 Procesando alimento: ${alimento.nombre} - ${alimento.cantidad}g`);
+              console.log(` Procesando alimento: ${alimento.nombre} - ${alimento.cantidad}g`);
               
               // Verificar disponibilidad en inventario
               const disponibilidad = await this.db.verificarDisponibilidadInventario(alimento.codigo, alimento.cantidad);
@@ -655,9 +655,9 @@ class GeneradorPlanes {
                   comida: tipoComida
                 });
                 
-                console.log(`✅ Inventario reducido: ${alimento.nombre} - ${alimento.cantidad}g`);
+                console.log(` Inventario reducido: ${alimento.nombre} - ${alimento.cantidad}g`);
               } else {
-                console.log(`⚠️ Saltando ${alimento.nombre} - inventario insuficiente (disponible: ${disponibilidad.cantidadDisponible}g)`);
+                console.log(` Saltando ${alimento.nombre} - inventario insuficiente (disponible: ${disponibilidad.cantidadDisponible}g)`);
                 
                 errores.push({
                   codigo: alimento.codigo,
@@ -678,13 +678,13 @@ class GeneradorPlanes {
                 error: error.message
               });
               
-              console.error(`❌ Error reduciendo inventario para ${alimento.nombre}:`, error.message);
+              console.error(` Error reduciendo inventario para ${alimento.nombre}:`, error.message);
             }
           }
         }
       }
       
-      console.log(`🎯 Confirmación completada - Éxitos: ${exitos.length}, Errores: ${errores.length}`);
+      console.log(` Confirmación completada - Éxitos: ${exitos.length}, Errores: ${errores.length}`);
       
       return {
         success: true,
@@ -699,7 +699,7 @@ class GeneradorPlanes {
       };
       
     } catch (error) {
-      console.error('❌ Error general al confirmar plan:', error.message);
+      console.error(' Error general al confirmar plan:', error.message);
       throw new Error(`Error al confirmar plan: ${error.message}`);
     }
   }

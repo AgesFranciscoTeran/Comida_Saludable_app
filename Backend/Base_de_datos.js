@@ -777,7 +777,7 @@ class BaseDeDatos {
       
       if (usuarioExistente) {
         usuarioId = usuarioExistente.id;
-        console.log(`📝 Usuario existente encontrado con ID: ${usuarioId}`);
+        console.log(` Usuario existente encontrado con ID: ${usuarioId}`);
       } else {
         try {
           // Normalizar el sexo para la base de datos

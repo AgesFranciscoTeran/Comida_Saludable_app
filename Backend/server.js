@@ -79,7 +79,7 @@ app.get('/api/inventario/:codigo/disponibilidad', async (req, res) => {
   }
 });
 
-// 🔄 Reiniciar inventario (útil para pruebas)
+//  Reiniciar inventario (útil para pruebas)
 app.post('/api/inventario/reiniciar', async (req, res) => {
   try {
     // Primero verificar si existen registros con bajo inventario
@@ -118,7 +118,7 @@ app.post('/api/inventario/reiniciar', async (req, res) => {
       nuevosLotesAgregados: result.affectedRows
     });
   } catch (error) {
-    console.error('❌ Error al reiniciar inventario:', error.message);
+    console.error(' Error al reiniciar inventario:', error.message);
     res.status(500).json({ 
       success: false,
       error: 'Error al reiniciar inventario',
@@ -127,7 +127,7 @@ app.post('/api/inventario/reiniciar', async (req, res) => {
   }
 });
 
-// 🎯 Confirmar plan y reducir inventario
+//  Confirmar plan y reducir inventario
 app.post('/api/planes/confirmar', async (req, res) => {
   try {
     const { planData } = req.body;
@@ -144,7 +144,7 @@ app.post('/api/planes/confirmar', async (req, res) => {
     res.json(resultado);
     
   } catch (error) {
-    console.error('❌ Error al confirmar plan:', error.message);
+    console.error(' Error al confirmar plan:', error.message);
     res.status(500).json({
       success: false,
       error: 'Error al confirmar plan',
@@ -175,7 +175,7 @@ app.get('/api/condiciones', async (req, res) => {
 //  🔹 Ruta corregida para crear usuario y generar plan
 // server.js (fragmento corregido)
 app.post('/api/usuarios', async (req, res) => {
-  console.log('📥 POST /api/usuarios body:', req.body);
+  console.log(' POST /api/usuarios body:', req.body);
 
   try {
     const {
@@ -215,12 +215,12 @@ app.post('/api/usuarios', async (req, res) => {
 
     // 5. Generar plan personalizado
     const plan = await generadorPlanes.generarPlanPersonalizado(usuario);
-    console.log('✅ Plan generado con ID:', plan.id);
+    console.log(' Plan generado con ID:', plan.id);
 
     return res.json({ plan });
 
   } catch (err) {
-    console.error('❌ Error en /api/usuarios:', err.message);
+    console.error(' Error en /api/usuarios:', err.message);
     return res.status(500).json({ error: err.message });
   }
 });
@@ -237,7 +237,7 @@ app.get('/api/descargar-plan/:planId', async (req, res) => {
     res.setHeader('Content-Disposition', `attachment; filename=plan_${planId}.json`);
     return res.send(json);
   } catch(err) {
-    console.error('❌ Error en /api/descargar-plan:', err);
+    console.error(' Error en /api/descargar-plan:', err);
     return res.status(500).json({ error: 'No se pudo descargar el plan' });
   }
 });
@@ -279,7 +279,7 @@ app.get('/api/alimentos/:codigo/analisis', async (req, res) => {
     });
 
   } catch (err) {
-    console.error('❌ Error en /api/alimentos/:codigo/analisis:', err);
+    console.error(' Error en /api/alimentos/:codigo/analisis:', err);
     return res.status(500).json({ error: 'Error al analizar alimento' });
   }
 });
