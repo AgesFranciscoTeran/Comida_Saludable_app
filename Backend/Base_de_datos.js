@@ -130,7 +130,7 @@ class BaseDeDatos {
     let connection;
     try {
       connection = await this.pool.getConnection();
-      const sql = `INSERT INTO usuario (nombre, email, edad, peso, altura, sexo, observaciones)
+      const sql = `INSERT INTO usuarios (nombre, email, edad, peso, altura, sexo, observaciones)
                  VALUES (?, ?, ?, ?, ?, ?, ?)`;
       const [resultado] = await connection.execute(sql, [nombre, email, edad, peso, altura, sexo, observaciones]);
       return resultado.insertId;
@@ -148,7 +148,7 @@ class BaseDeDatos {
       connection = await this.pool.getConnection();
       
       // Obtener el usuario más reciente con ese nombre
-      const sql = `SELECT * FROM usuario WHERE nombre = ? ORDER BY id DESC LIMIT 1`;
+      const sql = `SELECT * FROM usuarios WHERE nombre = ? ORDER BY id DESC LIMIT 1`;
       const [usuarios] = await connection.execute(sql, [nombre]);
       
       return usuarios[0] || null;
@@ -165,7 +165,7 @@ class BaseDeDatos {
       connection = await this.pool.getConnection();
       const [rows] = await connection.execute(
           `SELECT * 
-         FROM usuario 
+         FROM usuarios 
         WHERE email = ? 
         ORDER BY id DESC 
         LIMIT 1`,
@@ -186,7 +186,7 @@ class BaseDeDatos {
       // 1) Datos básicos
       const [users] = await connection.execute(
           `SELECT *
-           FROM usuario
+           FROM usuarios
            WHERE email = ?
            ORDER BY id DESC
            LIMIT 1`,
@@ -754,7 +754,7 @@ class BaseDeDatos {
       `;
       await connection.execute(sqlPlanes);
       
-      console.log('✅ Tablas usuarios y planes creadas/verificadas exitosamente');
+      console.log(' Tablas usuarios y planes creadas/verificadas exitosamente');
       return true;
     } catch (error) {
       console.error('Error al crear tablas:', error.message);
